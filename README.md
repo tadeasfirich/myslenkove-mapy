@@ -52,16 +52,20 @@ Jednorázově si musíš vyrobit vlastní „ID klienta“ – trvá to asi dese
 
 ### 3.2 Souhlasná obrazovka
 
-1. **APIs & Services** → **OAuth consent screen**.
-2. **User type: External** → **Create**.
+1. **APIs & Services** → **OAuth consent screen** (v novější konzoli se sekce jmenuje
+   **Google Auth Platform**).
+2. **User type / Audience: External** → **Create**.
 3. Vyplň jen povinné:
    - **App name:** `Myšlenkové mapy`
    - **User support email:** tvůj e-mail
    - **Developer contact information:** tvůj e-mail
    → **Save and continue**
 4. **Scopes** – nic nepřidávej (aplikace si o oprávnění řekne sama) → **Save and continue**.
-5. **Test users** → **Add users** → napiš svůj Gmail (a případně kolegy, kteří to mají
-   používat, max. 100) → **Save and continue**.
+5. **!!! Nepřeskakuj !!!** **Test users** → **Add users** → napiš **svůj vlastní Gmail**
+   (a případně kolegy, kteří to mají používat, max. 100) → **Save** / **Save and continue**.
+
+   V novější konzoli je to **Google Auth Platform → Audience → Test users → + Add users**.
+   Bez tohohle kroku tě Google k vlastní aplikaci nepustí – ani jako majitele projektu.
 
 ### 3.3 ID klienta
 
@@ -98,7 +102,47 @@ Při prvním přihlášení se může objevit hláška, že aplikaci Google neov
 
 ---
 
-## 4. Bezpečnost
+## 4. Když to nejede
+
+### „Přístup zablokován: aplikace … neprošla procesem ověření Googlem“ (chyba 403: access_denied)
+
+Nejčastější případ. Aplikace je v režimu **Testing** a tvůj účet není mezi testery.
+Majitel projektu se tam **nepřidá sám od sebe**, musíš se tam napsat ručně:
+
+**Google Cloud console → APIs & Services → OAuth consent screen** (nebo
+**Google Auth Platform**) **→ Audience → Test users → + Add users** → vlož
+svůj Gmail → **Save**. Pak zavři okno s chybou a v aplikaci klikni na **Google Disk**
+znovu. Funguje to okamžitě, nic se nečeká.
+
+Pozor na dvě věci:
+- e-mail musí sedět přesně s účtem, kterým se přihlašuješ,
+- projekt v Google Cloud musí patřit **témuž účtu** (zkontroluj si v konzoli vpravo
+  nahoře, pod kým jsi přihlášený).
+
+Druhá možnost, když to má používat víc lidí nebo nechceš seznam testerů řešit:
+ve stejné sekci **Audience** klikni na **Publish app** a potvrď. Naše aplikace si říká
+jen o oprávnění `drive.file`, což je u Googlu **non-sensitive** rozsah – ten ověřování
+nevyžaduje, takže aplikace v režimu Production funguje běžně dál. Ověření (a bezpečnostní
+audit) by Google chtěl, jen kdyby aplikace sahala na celý Disk nebo na Gmail.
+
+### „Nebyl nalezen klient OAuth“ / invalid_client
+
+Vložené **ID klienta** nesouhlasí. Zkopíruj ho v konzoli znovu (Credentials → tvůj
+klient) i s koncovkou `.apps.googleusercontent.com`.
+
+### Okno s přihlášením vůbec nevyskočí
+
+Prohlížeč zablokoval vyskakovací okno – povol ho pro svoji adresu a klikni znovu.
+
+### „origin is not allowed“ / přihlášení hned spadne
+
+V **Credentials → tvůj klient → Authorized JavaScript origins** musí být přesně
+`https://TVOJE-JMENO.github.io` – tedy **bez** lomítka na konci a **bez** názvu
+repozitáře. Změna se občas projeví až za pár minut.
+
+---
+
+## 5. Bezpečnost
 
 - Aplikace si říká o jediné oprávnění **`drive.file`**. To znamená, že vidí **výhradně
   soubory, které sama vytvořila** – ke zbytku tvého Disku se nedostane ani omylem.
@@ -116,7 +160,7 @@ Při prvním přihlášení se může objevit hláška, že aplikaci Google neov
 
 ---
 
-## 5. Formát souboru
+## 6. Formát souboru
 
 `*.mapa.json` je obyčejný čitelný JSON. Vedle textu drží i kompletní rozmístění:
 souřadnice, šířku a výšku každé buňky, stav rozbalení obsahu, pořadí vykreslení

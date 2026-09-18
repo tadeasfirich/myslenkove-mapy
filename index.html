@@ -317,6 +317,19 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--bg-3);border:1px sol
   border-radius:7px;font-size:14px;text-align:left}
 .ctxmenu button:hover{background:var(--bg-3)}
 .ctxmenu hr{border:0;border-top:1px solid var(--line);margin:4px 2px}
+.syncbar{
+  position:absolute;left:50%;transform:translateX(-50%);top:12px;z-index:26;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;
+  background:var(--bg-2);border:1px solid var(--accent);border-radius:12px;
+  padding:9px 12px;box-shadow:var(--shadow-3);max-width:min(620px,calc(100% - 24px));
+  font-size:13.5px;line-height:1.35;
+}
+.syncbar span{flex:1 1 220px;min-width:0}
+.syncbar .btn{flex:0 0 auto}
+.syncbar.hidden{display:none}
+@keyframes mmspin{to{transform:rotate(360deg)}}
+#btnSync.spin .ico{animation:mmspin .9s linear infinite;transform-origin:50% 50%}
+
 .marquee{position:absolute;border:1.5px solid var(--accent);background:var(--accent-soft);
   opacity:.5;pointer-events:none;z-index:5;border-radius:3px}
 
@@ -367,6 +380,9 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--bg-3);border:1px sol
     <div class="sep editor-only"></div>
     <input class="doc-title editor-only" id="docTitle" aria-label="Název mapy" />
     <span class="savestate editor-only" id="saveState"></span>
+    <button class="btn ghost icon editor-only" id="btnSync" title="Zkontrolovat změny z úložiště">
+      <svg class="ico" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-1.6 5.6"/><path d="M20 5.5V11h-5.5"/></svg>
+    </button>
 
     <div class="spacer"></div>
 
@@ -1253,7 +1269,7 @@ const Store = {
         out.push({
           key: 'drive:' + f.id, name: f.name, path: f.name,
           title: doc.locked ? f.name : doc.title,
-          handle: null, driveId: f.id, doc, local: false,
+          handle: null, driveId: f.id, doc, local: false, remoteMod: f.modifiedTime,
           modified: f.modifiedTime ? Date.parse(f.modifiedTime) : Date.now()
         });
       });
@@ -1293,7 +1309,8 @@ const Store = {
     if (this.drive) {
       const f = await Drive.createFile(name, text);
       const entry = { key: 'drive:' + f.id, name, path: name, title: doc.title,
-        handle: null, driveId: f.id, doc, local: false, modified: Date.now() };
+        handle: null, driveId: f.id, doc, local: false, remoteMod: f.modifiedTime,
+        modified: f.modifiedTime ? Date.parse(f.modifiedTime) : Date.now() };
       this.entries.unshift(entry);
       return entry;
     }
@@ -1323,11 +1340,13 @@ const Store = {
     entry.modified = doc.modified;
     const text = await docToText(doc);
     if (entry.driveId) {
-      await Drive.updateFile(entry.driveId, text);
+      const r = await Drive.updateFile(entry.driveId, text);
+      if (r && r.modifiedTime) { entry.remoteMod = r.modifiedTime; entry.modified = Date.parse(r.modifiedTime); }
     } else if (entry.handle) {
       const w = await entry.handle.createWritable();
       await w.write(text);
       await w.close();
+      try { entry.modified = (await entry.handle.getFile()).lastModified; } catch (e) { /* nevadí */ }
     } else {
       await IDB.set('maps', entry.key, { name: entry.name, doc, modified: doc.modified });
     }
@@ -1386,6 +1405,95 @@ const Store = {
       } catch (e) { /* ignoruj */ }
     }
     return n;
+  },
+
+  /* --- rychlý soupis souborů bez stahování obsahu --- */
+  async statAll() {
+    if (this.drive) {
+      const files = await Drive.list();
+      return files.map((f) => ({ key: 'drive:' + f.id, name: f.name, driveId: f.id,
+        stamp: f.modifiedTime || '', modified: f.modifiedTime ? Date.parse(f.modifiedTime) : 0 }));
+    }
+    if (this.dir) {
+      const out = [];
+      const walk = async (dirHandle, prefix, depth) => {
+        for await (const [name, handle] of dirHandle.entries()) {
+          if (name.startsWith('.')) continue;
+          if (handle.kind === 'directory') { if (depth < 3) await walk(handle, prefix + name + '/', depth + 1); continue; }
+          if (!/\.json$/i.test(name)) continue;
+          try {
+            const f = await handle.getFile();
+            out.push({ key: prefix + name, name, handle, dirHandle,
+              stamp: String(f.lastModified), modified: f.lastModified });
+          } catch (e) { /* přeskoč */ }
+        }
+      };
+      await walk(this.dir, '', 1);
+      return out;
+    }
+    return null;   // lokální režim se sám od sebe nemění
+  },
+
+  /** načte obsah jednoho souboru a vrátí dokument */
+  async readEntry(stat) {
+    if (stat.driveId) {
+      const txt = await Drive.download(stat.driveId);
+      return textToDoc(typeof txt === 'string' ? txt : JSON.stringify(txt));
+    }
+    const file = await stat.handle.getFile();
+    return textToDoc(await file.text());
+  },
+
+  /** porovná úložiště s tím, co máme načtené; vrátí seznam změn.
+   *  skipEntry = právě otevřená mapa (její obsah přebírá až Sync, ať se nepřepíšou úpravy) */
+  async poll(skipEntry) {
+    const stats = await this.statAll();
+    if (!stats) return null;
+    const byKey = Object.create(null);
+    this.entries.forEach((e) => { byKey[e.key] = e; });
+    const seen = Object.create(null);
+    const changed = [], added = [];
+    for (const st of stats) {
+      seen[st.key] = 1;
+      const cur = byKey[st.key];
+      if (!cur) { added.push(st); continue; }
+      const mine = cur.remoteMod != null ? cur.remoteMod : String(cur.modified || '');
+      if (st.stamp && st.stamp !== mine) changed.push({ st, entry: cur });
+    }
+    const removed = this.entries.filter((e) => !seen[e.key]);
+    if (!changed.length && !added.length && !removed.length) return { changed: [], added: [], removed: [] };
+
+    /* stáhneme jen to, co se opravdu změnilo */
+    this.locked = 0;
+    for (const c of changed) {
+      try {
+        const doc = await this.readEntry(c.st);
+        if (!doc) continue;
+        c.doc = doc;
+        c.entry.remoteMod = c.st.stamp;
+        c.entry.modified = c.st.modified;
+        if (c.st.name) { c.entry.name = c.st.name; c.entry.path = c.st.key; }
+        if (c.entry !== skipEntry) {
+          c.entry.doc = doc;
+          c.entry.title = doc.locked ? c.entry.name : doc.title;
+        }
+      } catch (e) { /* příště */ }
+    }
+    for (const a of added) {
+      try {
+        const doc = await this.readEntry(a);
+        if (!doc) continue;
+        const entry = { key: a.key, name: a.name, path: a.key, title: doc.locked ? a.name : doc.title,
+          handle: a.handle || null, dirHandle: a.dirHandle || null, driveId: a.driveId || null,
+          doc, local: false, remoteMod: a.stamp, modified: a.modified };
+        this.entries.push(entry);
+        a.entry = entry;
+      } catch (e) { /* příště */ }
+    }
+    if (removed.length) this.entries = this.entries.filter((e) => removed.indexOf(e) < 0);
+    this.entries.forEach((e) => { if (e.doc && e.doc.locked) this.locked++; });
+    this.entries.sort((a, b) => (b.modified || 0) - (a.modified || 0));
+    return { changed, added, removed };
   },
 
   /* --- znovu uloží všechny mapy (po zapnutí/vypnutí šifrování) --- */
@@ -3181,6 +3289,182 @@ function showUnlock(after) {
   });
 }
 
+/* ---- 57-sync.js ---- */
+/* ============================================================
+   Průběžná synchronizace – změny z jiného zařízení
+   ------------------------------------------------------------
+   Každých pár desítek vteřin (a hned po návratu do záložky)
+   se zeptáme úložiště, jestli se něco nezměnilo. Stahuje se
+   jen to, co má jiné datum změny.
+   ============================================================ */
+
+const Sync = {
+  INTERVAL: 20000,       // jak často kontrolovat (ms)
+  MIN_GAP: 4000,         // minimální odstup dvou kontrol
+  timer: null,
+  busy: false,
+  last: 0,
+  authLost: false,
+  conflict: null,        // {entry, doc}
+
+  start() {
+    this.stop();
+    if (!Store.drive && !Store.dir) return;
+    this.timer = setInterval(() => this.now(), this.INTERVAL);
+  },
+  stop() { if (this.timer) { clearInterval(this.timer); this.timer = null; } },
+
+  setStatus(txt) {
+    const el = $('#syncState');
+    if (!el) return;
+    el.textContent = txt || '';
+    el.classList.toggle('hidden', !txt);
+  },
+
+  async now(force) {
+    if (this.busy || this.authLost) return;
+    if (!Store.drive && !Store.dir) return;
+    if (!force && document.hidden) return;
+    if (!force && Date.now() - this.last < this.MIN_GAP) return;
+    this.busy = true;
+    const btn = $('#btnSync');
+    if (btn) btn.classList.add('spin');
+    try {
+      const openEntry = $('#editor').classList.contains('hidden') ? null : App.entry;
+      const res = await Store.poll(openEntry);
+      this.last = Date.now();
+      if (res && (res.changed.length || res.added.length || res.removed.length)) {
+        this.apply(res);
+      } else if (force) {
+        toast('Nic nového, všechno je aktuální');
+      }
+    } catch (err) {
+      const msg = String((err && err.message) || err);
+      if (/401|přihláš|invalid|token/i.test(msg)) {
+        this.authLost = true; this.stop(); this.showAuthBar();
+      } else {
+        console.warn('synchronizace:', msg);
+        if (force) toast('Nepodařilo se zkontrolovat změny: ' + msg.slice(0, 120), 4000);
+      }
+    } finally {
+      this.busy = false;
+      if (btn) btn.classList.remove('spin');
+    }
+  },
+
+  apply(res) {
+    const inEditor = !$('#editor').classList.contains('hidden');
+    const mine = App.entry;
+
+    if (mine && res.removed.indexOf(mine) >= 0) {
+      toast('Tahle mapa byla smazaná na jiném zařízení', 5000);
+      App.entry = null; App.doc = null;
+      showLibrary();
+      return;
+    }
+
+    const hit = res.changed.find((c) => c.entry === mine && c.doc);
+    if (inEditor && hit) {
+      if (App.dirty || App.undoStack.length && App.dirty) { this.showConflict(hit.entry, hit.doc); }
+      else { this.adopt(hit.entry, hit.doc); toast('Mapa aktualizovaná podle jiného zařízení'); }
+    }
+
+    if (!inEditor) {
+      renderLibrary();
+      const n = res.changed.length + res.added.length + res.removed.length;
+      this.setStatus('');
+      toast(n === 1 ? 'Knihovna aktualizovaná' : 'Knihovna aktualizovaná (' + n + ' změn)');
+    }
+  },
+
+  /** převezme cizí verzi otevřené mapy, ale nechá uživateli jeho výřez plátna */
+  adopt(entry, doc) {
+    if (doc.locked) { showLibrary(); return; }
+    const keepView = clone(App.doc.view);
+    const selNodes = Array.from(App.sel), selEdges = Array.from(App.selEdges);
+    App.suppressSave = true;
+    entry.doc = doc;
+    App.doc = doc;
+    App.doc.view = keepView;
+    App.sizes = Object.create(null);
+    nodeEls.forEach((el) => el.remove()); nodeEls.clear();
+    App.undoStack.length = 0; App.redoStack.length = 0; updateHistoryButtons();
+    $('#docTitle').value = doc.title;
+    renderNodes();
+    applyView();
+    App.sel = new Set(selNodes.filter((id) => getNode(id)));
+    App.selEdges = new Set(selEdges.filter((id) => getEdge(id)));
+    refreshSelection();
+    App.dirty = false;
+    setSaveState('Načteno z úložiště ' + fmtDate(Date.now()), false);
+    this.hideBar();
+    requestAnimationFrame(() => { measure(); App.suppressSave = false; });
+  },
+
+  /* ---------------- lišta s hlášením ---------------- */
+  bar(html, actions) {
+    let b = $('#syncBar');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = 'syncBar'; b.className = 'syncbar';
+      els.canvas.appendChild(b);
+    }
+    b.innerHTML = '<span>' + html + '</span>';
+    (actions || []).forEach((a) => {
+      const btn = document.createElement('button');
+      btn.className = 'btn sm' + (a.primary ? ' primary' : '');
+      btn.textContent = a.label;
+      btn.addEventListener('click', a.fn);
+      b.appendChild(btn);
+    });
+    b.classList.remove('hidden');
+    return b;
+  },
+  hideBar() { const b = $('#syncBar'); if (b) b.classList.add('hidden'); },
+
+  showConflict(entry, doc) {
+    this.conflict = { entry, doc };
+    this.bar('Mapa se mezitím změnila na jiném zařízení a ty tu máš neuložené úpravy.', [
+      { label: 'Načíst jejich verzi', fn: () => this.adopt(entry, doc) },
+      { label: 'Nechat moji', primary: true, fn: async () => {
+        this.hideBar();
+        entry.remoteMod = null;
+        await saveNow();
+        toast('Uloženo – tvoje verze přepsala tu druhou');
+      } }
+    ]);
+  },
+
+  showAuthBar() {
+    this.bar('Přihlášení ke Google Disku vypršelo.', [
+      { label: 'Přihlásit znovu', primary: true, fn: async () => {
+        try {
+          await Drive.signIn(true);
+          this.authLost = false; this.hideBar(); this.start(); this.now(true);
+          toast('Připojeno');
+        } catch (e) { toast('Přihlášení se nezdařilo', 4000); }
+      } }
+    ]);
+    if ($('#library').classList.contains('hidden')) return;
+    toast('Přihlášení ke Google Disku vypršelo – klikni na Google Disk', 5000);
+  },
+
+  /* token si obnovíme potichu při běžném kliknutí uživatele, ať nic neblokuje popup */
+  hookGestureRefresh() {
+    let running = false;
+    const h = async () => {
+      if (running || !Store.drive || !Drive.connected) return;
+      if (Date.now() < Drive.expiresAt - 10 * 60 * 1000) return;
+      running = true;
+      try { await Drive.signIn(false); this.authLost = false; this.hideBar(); this.start(); }
+      catch (e) { /* zkusíme příště */ }
+      finally { running = false; }
+    };
+    document.addEventListener('pointerdown', h, true);
+    document.addEventListener('keydown', h, true);
+  }
+};
+
 /* ---- 60-app.js ---- */
 /* ============================================================
    Knihovna listů, přepínání obrazovek, start aplikace
@@ -3191,7 +3475,9 @@ function showLibrary() {
   $('#library').classList.remove('hidden');
   $('#editor').classList.add('hidden');
   $$('.editor-only').forEach((e) => e.classList.add('hidden'));
+  Sync.hideBar();
   renderLibrary();
+  setTimeout(() => Sync.now(), 200);
 }
 
 function showEditor() {
@@ -3320,6 +3606,7 @@ function renderLibrary() {
 /* ----------------------------- otevření mapy ----------------------------- */
 async function openMap(entry) {
   if (entry.doc && entry.doc.locked) { showUnlock(); return; }
+  Sync.hideBar();
   App.entry = entry;
   App.doc = entry.doc;
   App.sel.clear(); App.selEdges.clear();
@@ -3382,6 +3669,7 @@ async function manualSave() {
 /* ----------------------------- Google Disk -------------------------------- */
 async function connectDrive() {
   if (Store.drive) {
+    Sync.stop();
     Store.disconnectDrive();
     await Store.loadLocal();
     renderLibrary();
@@ -3401,6 +3689,7 @@ async function connectDrive() {
   try {
     await Store.connectDrive();
     localStorage.setItem('mm.drive.last', '1');
+    Sync.authLost = false; Sync.start();
     renderLibrary();
     toast('Připojeno – složka „' + Drive.folderName + '“ na Google Disku');
     if (Store.locked && !Crypt.ready) showUnlock();
@@ -3420,6 +3709,7 @@ async function pickFolder() {
   try {
     await Store.pickFolder();
     $('#btnReconnect').classList.add('hidden');
+    Sync.start();
     renderLibrary();
     toast('Složka „' + Store.dirName + '“ je připojená');
   } catch (err) {
@@ -3458,8 +3748,12 @@ function showHelp() {
         '<kbd>kolečko myši, dva prsty</kbd><span>přiblížení</span>' +
         '<kbd>F</kbd><span>vycentrovat celou mapu</span>' +
         '<kbd>Ctrl + S</kbd><span>uložit hned</span>' +
+        '<kbd>tlačítko ⟳ nahoře</kbd><span>hned zkontrolovat změny z úložiště</span>' +
       '</div>' +
-      '<p class="tiny" style="margin-top:14px">Jak má vypadat každá nově vytvořená vazba (šipka, čára, barva) ' +
+      '<p class="tiny" style="margin-top:14px">Když mapy ukládáš na Google Disk (nebo do složky, kterou synchronizuje jiná služba), ' +
+      'aplikace si každých pár desítek vteřin sama ověří, jestli se něco nezměnilo na druhém zařízení, a rovnou to načte. ' +
+      'Kontroluje i po přepnutí zpátky do okna. Pokud máš zrovna něco rozdělaného, zeptá se, kterou verzi si necháš.</p>' +
+      '<p class="tiny" style="margin-top:10px">Jak má vypadat každá nově vytvořená vazba (šipka, čára, barva) ' +
       'nastavíš v panelu <strong>Detail</strong>, když nemáš nic vybraného – sekce „Výchozí vzhled nové vazby“. ' +
       'Nastavení si pamatuje každá mapa zvlášť.</p>' +
       '<p class="tiny" style="margin-top:10px">Mapy se ukládají jako čitelné soubory <code>*.mapa.json</code> ' +
@@ -3485,6 +3779,7 @@ async function init() {
   $('#btnUndo').addEventListener('click', undo);
   $('#btnRedo').addEventListener('click', redo);
   $('#btnHelp').addEventListener('click', showHelp);
+  $('#btnSync').addEventListener('click', () => Sync.now(true));
 
   const dt = $('#docTitle');
   dt.addEventListener('focus', () => { lastSnap = snapshot(); });
@@ -3583,7 +3878,13 @@ async function init() {
   }, true);
 
   window.addEventListener('resize', debounce(() => { measure(); }, 150));
-  document.addEventListener('visibilitychange', () => { if (document.hidden && App.dirty) doSave.flush(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { if (App.dirty) doSave.flush(); }
+    else setTimeout(() => Sync.now(), 300);
+  });
+  window.addEventListener('focus', () => setTimeout(() => Sync.now(), 300));
+  window.addEventListener('online', () => Sync.now());
+  Sync.hookGestureRefresh();
   window.addEventListener('pagehide', () => { if (App.dirty) doSave.flush(); });
   window.addEventListener('beforeunload', (e) => {
     if (App.dirty) { doSave.flush(); e.preventDefault(); e.returnValue = ''; }
@@ -3609,6 +3910,7 @@ async function init() {
   if (Store.locked && !Crypt.ready) setTimeout(() => showUnlock(), 400);
   syncTools();
   showLibrary();
+  Sync.start();
 }
 
 function syncTools() {
