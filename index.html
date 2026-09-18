@@ -68,6 +68,7 @@ button{cursor:pointer;background:none;border:0;padding:0}
   font-size:14px;font-weight:500;white-space:nowrap;box-shadow:var(--shadow-1);
   transition:background .12s,border-color .12s,transform .06s;
 }
+a.btn{text-decoration:none;color:var(--fg)}
 .btn:hover{background:var(--bg-3)}
 .btn:active{transform:translateY(1px)}
 .btn.primary{background:var(--accent);border-color:transparent;color:var(--accent-fg)}
@@ -423,6 +424,10 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--bg-3);border:1px sol
           <svg class="ico" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-1.6 5.6"/><path d="M20 5.5V11h-5.5"/></svg>
           <span class="lbl">Obnovit</span>
         </button>
+        <a class="btn hidden" id="btnOpenDrive" target="_blank" rel="noopener" title="Otevřít složku přímo na Google Disku">
+          <svg class="ico" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 13.5V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5.5"/></svg>
+          <span class="lbl">Složka na Disku</span>
+        </a>
         <button class="btn icon" id="btnSettings" title="Nastavení – Google Disk a šifrování">
           <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 14.6a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5v.2a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/></svg>
         </button>
@@ -1278,7 +1283,8 @@ const Store = {
   },
 
   /* --- lokální (záložní) režim --- */
-  async loadLocal() {
+  async loadLocal(force) {
+    if ((this.drive || this.dir) && !force) return;   // pojistka: nepřepiš připojené úložiště
     const keys = (await IDB.keys('maps')) || [];
     const vals = (await IDB.all('maps')) || [];
     const out = [];
@@ -1347,6 +1353,24 @@ const Store = {
       await w.write(text);
       await w.close();
       try { entry.modified = (await entry.handle.getFile()).lastModified; } catch (e) { /* nevadí */ }
+    } else if (this.drive || this.dir) {
+      /* mapa zatím nemá soubor v aktuálním úložišti – založíme ho tam,
+         ať se nikdy nestane, že by se ukládalo potichu jen do prohlížeče */
+      const oldKey = entry.key;
+      const name = entry.name || this.uniqueName(doc.title);
+      if (this.drive) {
+        const f = await Drive.createFile(name, text);
+        entry.driveId = f.id; entry.key = 'drive:' + f.id;
+        entry.remoteMod = f.modifiedTime;
+        entry.modified = f.modifiedTime ? Date.parse(f.modifiedTime) : Date.now();
+      } else {
+        const h = await this.dir.getFileHandle(name, { create: true });
+        const w = await h.createWritable(); await w.write(text); await w.close();
+        entry.handle = h; entry.dirHandle = this.dir; entry.key = name;
+        try { entry.modified = (await h.getFile()).lastModified; } catch (e) { /* nevadí */ }
+      }
+      entry.name = name; entry.path = name; entry.local = false;
+      if (oldKey && String(oldKey).indexOf('loc') === 0) IDB.del('maps', oldKey);
     } else {
       await IDB.set('maps', entry.key, { name: entry.name, doc, modified: doc.modified });
     }
@@ -1496,6 +1520,31 @@ const Store = {
     return { changed, added, removed };
   },
 
+  /* --- mapy, které zůstaly jen v prohlížeči --- */
+  async localOnly() {
+    const keys = (await IDB.keys('maps')) || [];
+    const vals = (await IDB.all('maps')) || [];
+    return vals.map((v, i) => ({ key: keys[i], name: v.name, doc: v.doc, modified: v.modified }))
+      .filter((x) => x && x.doc);
+  },
+
+  /** přenese mapy z prohlížeče do připojeného úložiště (Disk / složka) */
+  async uploadLocal() {
+    if (!this.drive && !this.dir) return 0;
+    const list = await this.localOnly();
+    let n = 0;
+    for (const l of list) {
+      try {
+        const doc = normalizeDoc(l.doc);
+        if (!doc) continue;
+        await this.createFrom(doc);
+        await IDB.del('maps', l.key);
+        n++;
+      } catch (e) { console.warn('nahrání selhalo', e); }
+    }
+    return n;
+  },
+
   /* --- znovu uloží všechny mapy (po zapnutí/vypnutí šifrování) --- */
   async rewriteAll(onProgress) {
     let i = 0;
@@ -1594,6 +1643,8 @@ const Drive = {
     });
   },
 
+  authError(msg) { const e = new Error(msg); e.auth = true; return e; },
+
   /** interactive=false zkusí obnovit token potichu */
   async signIn(interactive) {
     await this.initClient();
@@ -1605,15 +1656,15 @@ const Drive = {
           this.connected = true;
           resolve(true);
         } else {
-          reject(new Error((resp && (resp.error_description || resp.error)) || 'Přihlášení se nezdařilo'));
+          reject(this.authError((resp && (resp.error_description || resp.error)) || 'Přihlášení se nezdařilo'));
         }
       };
       this.tokenClient.error_callback = (err) => {
-        reject(new Error((err && (err.message || err.type)) || 'Přihlášení bylo zrušeno'));
+        reject(this.authError((err && (err.message || err.type)) || 'Přihlášení bylo zrušeno'));
       };
       try {
-        this.tokenClient.requestAccessToken({ prompt: interactive === false ? '' : '' });
-      } catch (e) { reject(e); }
+        this.tokenClient.requestAccessToken({ prompt: '' });
+      } catch (e) { e.auth = true; reject(e); }
     });
   },
 
@@ -1645,7 +1696,9 @@ const Drive = {
     }
     if (!r.ok) {
       const txt = await r.text().catch(() => '');
-      throw new Error('Google Disk (' + r.status + '): ' + txt.slice(0, 160));
+      const e = new Error('Google Disk (' + r.status + '): ' + txt.slice(0, 160));
+      if (r.status === 401 || r.status === 403) e.auth = (r.status === 401);
+      throw e;
     }
     const ct = r.headers.get('content-type') || '';
     return ct.indexOf('json') >= 0 ? r.json() : r.text();
@@ -1714,16 +1767,19 @@ const Drive = {
     return { body, type: 'multipart/related; boundary=' + b };
   },
 
+  /* keepalive drží požadavek naživu, i když uživatel zavře záložku (limit ~64 kB) */
+  keep(body) { return typeof body === 'string' && body.length < 55000; },
+
   async createFile(name, text) {
     const mp = this.multipart({ name, parents: [this.folderId] }, text);
     return this.api('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime',
-      { method: 'POST', headers: { 'Content-Type': mp.type }, body: mp.body });
+      { method: 'POST', headers: { 'Content-Type': mp.type }, body: mp.body, keepalive: this.keep(mp.body) });
   },
 
   async updateFile(id, text) {
     return this.api('https://www.googleapis.com/upload/drive/v3/files/' +
       encodeURIComponent(id) + '?uploadType=media&fields=id,name,modifiedTime',
-      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: text });
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: text, keepalive: this.keep(text) });
   },
 
   async renameFile(id, name) {
@@ -2062,19 +2118,36 @@ function setSaveState(txt, dirty) {
   els.saveState.textContent = txt;
   els.saveState.classList.toggle('dirty', !!dirty);
 }
+let saveFails = 0;
 const doSave = debounce(async () => {
   if (!App.entry || App.suppressSave) return;
   try {
     syncSizes();
     await Store.write(App.entry);
     App.dirty = false;
+    saveFails = 0;
+    if (typeof Sync !== 'undefined' && Sync.barKind === 'save') Sync.hideBar();
     setSaveState('Uloženo ' + fmtDate(Date.now()), false);
   } catch (err) {
     console.error(err);
-    setSaveState('Neuloženo!', true);
-    toast('Uložení selhalo: ' + (err && err.message ? err.message : err), 4000);
+    saveFails++;
+    App.dirty = true;
+    const msg = (err && err.message ? err.message : String(err));
+    setSaveState('Neuloženo! (' + saveFails + '. pokus)', true);
+    if (typeof Sync !== 'undefined') {
+      if (err && err.auth) {
+        Sync.authLost = true; Sync.stop(); Sync.showAuthBar();
+      } else {
+        Sync.barKind = 'save';
+        Sync.bar('Uložení se nepovedlo: ' + esc(msg.slice(0, 140)), [
+          { label: 'Zkusit hned', primary: true, fn: () => { Sync.hideBar(); doSave(); } },
+          { label: 'Stáhnout kopii', fn: () => downloadDoc(App.doc, App.entry ? App.entry.name : null) }
+        ]);
+        if (saveFails <= 5) setTimeout(() => doSave(), 4000 * saveFails);
+      }
+    }
   }
-}, 700);
+}, 500);
 
 function scheduleSave() {
   if (!App.entry || App.suppressSave) return;
@@ -3305,6 +3378,7 @@ const Sync = {
   busy: false,
   last: 0,
   authLost: false,
+  barKind: '',           // 'save' | 'conflict' | 'auth'
   conflict: null,        // {entry, doc}
 
   start() {
@@ -3340,7 +3414,7 @@ const Sync = {
       }
     } catch (err) {
       const msg = String((err && err.message) || err);
-      if (/401|přihláš|invalid|token/i.test(msg)) {
+      if ((err && err.auth) || /401|přihláš|invalid|token/i.test(msg)) {
         this.authLost = true; this.stop(); this.showAuthBar();
       } else {
         console.warn('synchronizace:', msg);
@@ -3420,10 +3494,11 @@ const Sync = {
     b.classList.remove('hidden');
     return b;
   },
-  hideBar() { const b = $('#syncBar'); if (b) b.classList.add('hidden'); },
+  hideBar() { const b = $('#syncBar'); if (b) b.classList.add('hidden'); this.barKind = ''; },
 
   showConflict(entry, doc) {
     this.conflict = { entry, doc };
+    this.barKind = 'conflict';
     this.bar('Mapa se mezitím změnila na jiném zařízení a ty tu máš neuložené úpravy.', [
       { label: 'Načíst jejich verzi', fn: () => this.adopt(entry, doc) },
       { label: 'Nechat moji', primary: true, fn: async () => {
@@ -3436,6 +3511,7 @@ const Sync = {
   },
 
   showAuthBar() {
+    this.barKind = 'auth';
     this.bar('Přihlášení ke Google Disku vypršelo.', [
       { label: 'Přihlásit znovu', primary: true, fn: async () => {
         try {
@@ -3453,6 +3529,8 @@ const Sync = {
   hookGestureRefresh() {
     let running = false;
     const h = async () => {
+      /* při každém doteku zkontrolujeme, jestli nám něco neuteklo */
+      if (Date.now() - this.last > this.INTERVAL) this.now();
       if (running || !Store.drive || !Drive.connected) return;
       if (Date.now() < Drive.expiresAt - 10 * 60 * 1000) return;
       running = true;
@@ -3573,9 +3651,10 @@ function renderLibrary() {
   const fp = $('#folderPath');
   const count = Store.entries.length + ' ' + plural(Store.entries.length, 'mapa', 'mapy', 'map');
   const lock = Crypt.on ? (Crypt.ready ? '  ·  🔒 šifrováno' : '  ·  🔒 zamčeno') : '';
+  const checked = Sync.last ? '  ·  ověřeno ' + fmtDate(Sync.last).replace('dnes ', '') : '';
   if (Store.drive) fp.innerHTML = 'Google Disk › <a href="' + Drive.folderUrl() +
-    '" target="_blank" rel="noopener">' + esc(Drive.folderName) + '</a>  ·  ' + count + lock;
-  else if (Store.dir) fp.textContent = 'Složka: ' + Store.dirName + '  ·  ' + count + lock;
+    '" target="_blank" rel="noopener">' + esc(Drive.folderName) + '</a>  ·  ' + count + lock + checked;
+  else if (Store.dir) fp.textContent = 'Složka: ' + Store.dirName + '  ·  ' + count + lock + checked;
   else if (!HAS_FS) fp.textContent = 'Mapy se ukládají do prohlížeče (tento prohlížeč neumí zapisovat přímo do složky).';
   else fp.textContent = 'Žádná složka není vybraná';
 
@@ -3584,6 +3663,14 @@ function renderLibrary() {
     if (Store.drive) lead.textContent = 'Mapy se ukládají do složky na tvém Google Disku a jsou tak dostupné z každého počítače, kde se přihlásíš.';
     else if (Store.dir) lead.textContent = 'Mapy se ukládají do vybrané složky v počítači. Změny se zapisují průběžně samy.';
     else if (HAS_FS) lead.textContent = 'Vyber složku v počítači nebo se připoj ke Google Disku – aplikace v ní najde všechny mapy, zobrazí je jako miniatury a změny do nich průběžně ukládá.';
+  }
+
+  checkLeftovers();
+
+  const od = $('#btnOpenDrive');
+  if (od) {
+    od.classList.toggle('hidden', !Store.drive);
+    if (Store.drive) od.href = Drive.folderUrl();
   }
 
   const dl = $('#driveLabel');
@@ -3601,6 +3688,44 @@ function renderLibrary() {
     $('#libEmpty').classList.add('hidden');
     grid.parentElement.appendChild(b);
   }
+}
+
+/** mapy, které zůstaly jen v prohlížeči, i když jsme připojení k Disku/složce */
+async function checkLeftovers() {
+  const old = $('#leftoverBar');
+  if (old) old.remove();
+  if (!(Store.drive || Store.dir)) return;
+  let list = [];
+  try { list = await Store.localOnly(); } catch (e) { return; }
+  if (!list.length) return;
+  const bar = document.createElement('div');
+  bar.id = 'leftoverBar';
+  bar.className = 'folderbar';
+  bar.style.borderColor = 'var(--accent)';
+  const txt = document.createElement('span');
+  txt.className = 'tiny';
+  txt.style.flex = '1';
+  txt.innerHTML = '<strong>' + list.length + ' ' + plural(list.length, 'mapa je', 'mapy jsou', 'map je') +
+    ' uložených jen v tomhle prohlížeči</strong>, ne v připojeném úložišti.';
+  bar.appendChild(txt);
+  const btn = document.createElement('button');
+  btn.className = 'btn primary';
+  btn.textContent = Store.drive ? 'Nahrát je na Disk' : 'Přenést je do složky';
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = 'Nahrávám…';
+    try {
+      const n = await Store.uploadLocal();
+      await Store.scan();
+      renderLibrary();
+      toast('Přeneseno: ' + n + ' ' + plural(n, 'mapa', 'mapy', 'map'));
+    } catch (err) {
+      toast('Přenos selhal: ' + (err && err.message ? err.message : err), 5000);
+      btn.disabled = false; btn.textContent = 'Zkusit znovu';
+    }
+  });
+  bar.appendChild(btn);
+  const fb = $('.folderbar');
+  fb.parentElement.insertBefore(bar, fb.nextSibling);
 }
 
 /* ----------------------------- otevření mapy ----------------------------- */
@@ -3671,7 +3796,7 @@ async function connectDrive() {
   if (Store.drive) {
     Sync.stop();
     Store.disconnectDrive();
-    await Store.loadLocal();
+    await Store.loadLocal(true);
     renderLibrary();
     toast('Google Disk odpojen');
     return;
@@ -3796,8 +3921,25 @@ async function init() {
     if (await Store.reconnect()) { $('#btnReconnect').classList.add('hidden'); renderLibrary(); }
   });
   $('#btnRescan').addEventListener('click', async () => {
-    if (Store.dir) { await Store.scan(); } else { await Store.loadLocal(); }
-    renderLibrary(); toast('Obnoveno');
+    const btn = $('#btnRescan');
+    btn.disabled = true;
+    try {
+      if (Store.drive || Store.dir) {
+        await Store.scan();
+        Sync.last = Date.now();
+        toast(Store.drive ? 'Načteno z Google Disku (' + Store.entries.length + ' ' +
+          plural(Store.entries.length, 'mapa', 'mapy', 'map') + ')' : 'Složka načtena znovu');
+      } else {
+        await Store.loadLocal(true);
+        toast('Obnoveno');
+      }
+    } catch (err) {
+      console.error(err);
+      toast('Obnovení selhalo: ' + (err && err.message ? err.message : err), 5000);
+    } finally {
+      btn.disabled = false;
+      renderLibrary();
+    }
   });
   $('#libFilter').addEventListener('input', (e) => { libFilter = e.target.value; renderLibrary(); });
   $('#btnSettings').addEventListener('click', showSettings);
@@ -3905,7 +4047,7 @@ async function init() {
       $('#btnReconnect').classList.remove('hidden');
       $('#folderPath').textContent = 'Složka „' + Store.dirName + '“ – potvrď prosím přístup';
     }
-    if (!Store.dir) await Store.loadLocal();
+    if (!Store.dir) await Store.loadLocal(true);
   }
   if (Store.locked && !Crypt.ready) setTimeout(() => showUnlock(), 400);
   syncTools();

@@ -125,6 +125,20 @@ jen o oprávnění `drive.file`, což je u Googlu **non-sensitive** rozsah – t
 nevyžaduje, takže aplikace v režimu Production funguje běžně dál. Ověření (a bezpečnostní
 audit) by Google chtěl, jen kdyby aplikace sahala na celý Disk nebo na Gmail.
 
+### Mapy nevidím na svém Disku
+
+V knihovně klikni na **Složka na Disku** – otevře přesně tu složku, do které aplikace
+ukládá (jmenuje se *Myšlenkové mapy*, pokud jsi ji nepřejmenoval). Kdyby některé mapy
+zůstaly jen v prohlížeči (třeba z doby, než jsi Disk připojil), aplikace to pozná a nabídne
+modrým pruhem **Nahrát je na Disk**.
+
+### Změna z mobilu se neobjeví na počítači
+
+Aplikace se ptá Disku každých ~20 vteřin, ale jen když je okno vidět – po přepnutí zpátky
+na záložku se zeptá hned. Ručně to vyvoláš tlačítkem **⟳** vedle názvu mapy nebo
+**Obnovit** v knihovně. Na mobilu se změna ukládá půl vteřiny po posledním kliknutí,
+takže než telefon zamkneš, je na Disku.
+
 ### „Nebyl nalezen klient OAuth“ / invalid_client
 
 Vložené **ID klienta** nesouhlasí. Zkopíruj ho v konzoli znovu (Credentials → tvůj
