@@ -117,6 +117,7 @@ a.btn{text-decoration:none;color:var(--fg)}
 
 /* ---------- library ---------- */
 .library{flex:1;overflow:auto;padding:22px 20px 60px}
+.library.dropping{outline:3px dashed var(--accent);outline-offset:-10px;background:var(--accent-soft)}
 .lib-inner{max-width:1180px;margin:0 auto}
 .lib-hero{margin-bottom:22px}
 .lib-hero h1{font-size:clamp(22px,4vw,30px);margin:0 0 6px;letter-spacing:-.02em}
@@ -433,7 +434,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--bg-3);border:1px sol
         </button>
         <button class="btn" id="btnImport">
           <svg class="ico" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="m7.5 8.5 4.5-4.5 4.5 4.5"/><path d="M4 16v3.5h16V16"/></svg>
-          <span class="lbl">Importovat soubor</span>
+          <span class="lbl">Importovat mapu</span>
         </button>
         <input class="input" id="libFilter" type="search" placeholder="Hledat v mapách…" style="max-width:220px" aria-label="Hledat v mapách">
         <div class="spacer"></div>
@@ -734,8 +735,10 @@ const FILE_EXT = '.mapa.json';
 const COLORS = [
   { id: 'none',   label: 'Bez barvy', hex: '' },
   { id: 'blue',   label: 'Modrá',     hex: '#3b6ef0' },
+  { id: 'indigo', label: 'Modrofialová', hex: '#5b62c4' },
   { id: 'teal',   label: 'Tyrkysová', hex: '#12a594' },
   { id: 'green',  label: 'Zelená',    hex: '#3d9a50' },
+  { id: 'lime',   label: 'Limetková', hex: '#7aa61a' },
   { id: 'amber',  label: 'Žlutá',     hex: '#e0a018' },
   { id: 'orange', label: 'Oranžová',  hex: '#e26a2c' },
   { id: 'red',    label: 'Červená',   hex: '#d9453d' },
@@ -978,6 +981,368 @@ function thumbSVG(doc, W, H) {
   }
   return '<svg class="thumb" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" ' +
     'style="color:var(--fg-3)" preserveAspectRatio="xMidYMid meet">' + g + '</svg>';
+}
+
+/* ---- 12-import.js ---- */
+/* ============================================================
+   Import map z jiných programů
+   ------------------------------------------------------------
+   *.orgpage / *.edn  – export z OrgPadu ve formátu EDN (věrnější)
+   *.canvas           – JSON Canvas (Obsidian a spol.)
+   ============================================================ */
+
+/* ---------------------- čtečka EDN ---------------------- */
+function parseEDN(src) {
+  let i = 0;
+  const isWs = (c) => c === ' ' || c === '\n' || c === '\t' || c === '\r' || c === ',';
+  const isDelim = (c) => c === undefined || isWs(c) || '()[]{}"'.indexOf(c) >= 0 || c === ';';
+
+  function skipWs() {
+    for (;;) {
+      while (i < src.length && isWs(src[i])) i++;
+      if (src[i] === ';') { while (i < src.length && src[i] !== '\n') i++; continue; }
+      if (src[i] === '#' && src[i + 1] === '_') { i += 2; readValue(); continue; }
+      return;
+    }
+  }
+  function readString() {
+    i++; let out = '';
+    while (i < src.length && src[i] !== '"') {
+      if (src[i] === '\\') {
+        i++;
+        const e = src[i];
+        if (e === 'n') out += '\n';
+        else if (e === 't') out += '\t';
+        else if (e === 'r') out += '\r';
+        else if (e === 'u') { out += String.fromCharCode(parseInt(src.substr(i + 1, 4), 16)); i += 4; }
+        else out += e;
+        i++;
+      } else { out += src[i]; i++; }
+    }
+    i++;
+    return out;
+  }
+  function readToken() { const s = i; while (!isDelim(src[i])) i++; return src.slice(s, i); }
+  function readSeq(close) {
+    const a = [];
+    for (;;) {
+      skipWs();
+      if (i >= src.length) break;
+      if (src[i] === close) { i++; break; }
+      a.push(readValue());
+    }
+    return a;
+  }
+  function readValue() {
+    skipWs();
+    const c = src[i];
+    if (c === undefined) return undefined;
+    if (c === '"') return readString();
+    if (c === '[') { i++; return readSeq(']'); }
+    if (c === '(') { i++; return readSeq(')'); }
+    if (c === '{') {
+      i++;
+      const o = Object.create(null);
+      for (;;) {
+        skipWs();
+        if (i >= src.length) break;
+        if (src[i] === '}') { i++; break; }
+        const k = readValue();
+        const v = readValue();
+        o[String(k)] = v;
+      }
+      return o;
+    }
+    if (c === '#') {
+      i++;
+      if (src[i] === '{') { i++; return readSeq('}'); }      // množina
+      readToken();                                            // #uuid, #inst … značku zahodíme
+      return readValue();
+    }
+    if (c === ':') { i++; return ':' + readToken(); }
+    const tok = readToken();
+    if (tok === 'nil') return null;
+    if (tok === 'true') return true;
+    if (tok === 'false') return false;
+    if (/^[-+]?(\d|\.\d)/.test(tok)) {
+      const n = Number(tok.replace(/[NM]$/, ''));
+      if (!isNaN(n)) return n;
+    }
+    return tok;
+  }
+  return readValue();
+}
+
+/* ---------------------- hiccup -> Markdown ---------------------- */
+function hicAttrs(n) {
+  return (n[1] && typeof n[1] === 'object' && !Array.isArray(n[1])) ? n[1] : null;
+}
+function hicKids(n) { return n.slice(hicAttrs(n) ? 2 : 1); }
+
+function hiccupInline(n) {
+  if (n == null) return '';
+  if (typeof n === 'string') return n;
+  if (typeof n === 'number') return String(n);
+  if (!Array.isArray(n)) return '';
+  const tag = n[0];
+  const at = hicAttrs(n) || {};
+  const kids = hicKids(n).map(hiccupInline).join('');
+  switch (tag) {
+    case ':a': {
+      const href = at[':href'] || at.href || '';
+      const label = kids.trim() || href;
+      return href ? '[' + label + '](' + href + ')' : label;
+    }
+    case ':b': case ':strong': return kids ? '**' + kids + '**' : '';
+    case ':i': case ':em': return kids ? '*' + kids + '*' : '';
+    case ':code': case ':kbd': return kids ? '`' + kids + '`' : '';
+    case ':del': case ':s': return kids ? '~~' + kids + '~~' : '';
+    case ':br': return '\n';
+    case ':img': return '![](' + (at[':src'] || at.src || '') + ')';
+    default: return kids;
+  }
+}
+
+function hiccupBlocks(list, indent) {
+  const out = [];
+  const pad = '  '.repeat(indent || 0);
+  (Array.isArray(list) ? list : [list]).forEach((n) => {
+    if (n == null) return;
+    if (typeof n === 'string') { if (n.trim()) out.push(pad + n.trim()); return; }
+    if (!Array.isArray(n)) return;
+    const tag = n[0];
+    const kids = hicKids(n);
+    if (tag === ':ul' || tag === ':ol') {
+      let k = 0;
+      kids.forEach((li) => {
+        if (!Array.isArray(li)) return;
+        const inline = [], nested = [];
+        hicKids(li).forEach((ch) => {
+          if (Array.isArray(ch) && (ch[0] === ':ul' || ch[0] === ':ol')) nested.push(ch);
+          else inline.push(ch);
+        });
+        k++;
+        const bullet = tag === ':ol' ? k + '. ' : '- ';
+        const txt = inline.map(hiccupInline).join('').replace(/\s+$/, '');
+        out.push(pad + bullet + txt);
+        nested.forEach((nn) => { const s = hiccupBlocks([nn], (indent || 0) + 1); if (s) out.push(s); });
+      });
+    } else if (/^:h[1-6]$/.test(tag)) {
+      out.push(pad + '#'.repeat(Math.min(3, Number(tag[2]))) + ' ' + kids.map(hiccupInline).join('').trim());
+    } else if (tag === ':blockquote') {
+      out.push(pad + '> ' + kids.map(hiccupInline).join('').trim());
+    } else if (tag === ':pre') {
+      out.push('```\n' + kids.map(hiccupInline).join('') + '\n```');
+    } else if (tag === ':hr') {
+      out.push('---');
+    } else if (tag === ':table') {
+      out.push(kids.map(hiccupInline).join(' ').trim());
+    } else if (tag === ':p' || tag === ':div' || tag === ':span') {
+      const t = kids.map(hiccupInline).join('').trim();
+      if (t) out.push(pad + t);
+    } else {
+      const t = hiccupInline(n).trim();
+      if (t) out.push(pad + t);
+    }
+  });
+  return out.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+/* ---------------------- barvy ---------------------- */
+const ORG_COLORS = {
+  ':color/lime': 'lime', ':color/green': 'green', ':color/teal': 'teal', ':color/mint': 'teal',
+  ':color/blue': 'blue', ':color/sky': 'blue', ':color/blueberry': 'indigo', ':color/indigo': 'indigo',
+  ':color/purple': 'purple', ':color/violet': 'purple', ':color/magenta': 'pink', ':color/pink': 'pink',
+  ':color/red': 'red', ':color/ruby': 'red', ':color/orange': 'orange', ':color/amber': 'amber',
+  ':color/yellow': 'amber', ':color/gold': 'amber', ':color/gray': 'gray', ':color/grey': 'gray',
+  ':color/silver': 'gray', ':color/black': 'gray', ':color/white': 'none'
+};
+function orgColor(c) { return (c && ORG_COLORS[c]) || 'none'; }
+
+const CANVAS_PRESET = { '1': 'red', '2': 'orange', '3': 'amber', '4': 'green', '5': 'teal', '6': 'purple' };
+/* barvy, které používá export z OrgPadu – ať .canvas vyjde stejně jako .orgpage */
+const KNOWN_HEX = {
+  '#677f05': 'lime', '#a3cb04': 'lime', '#7654ad': 'purple', '#a46bff': 'purple',
+  '#2f7ba7': 'blue', '#4aa3d8': 'blue', '#545ca8': 'indigo', '#6f79e0': 'indigo',
+  '#a7362f': 'red', '#d94f45': 'red', '#b06a12': 'orange', '#e0912b': 'orange',
+  '#1f7a63': 'teal', '#2fae8f': 'teal', '#a33a6d': 'pink', '#d4629b': 'pink',
+  '#6b7280': 'gray', '#9aa3ae': 'gray'
+};
+function nearestColor(hex) {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return 'none';
+  let h = m[1];
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  let best = 'none', bestD = Infinity;
+  COLORS.forEach((c) => {
+    if (!c.hex) return;
+    const cr = parseInt(c.hex.slice(1, 3), 16), cg = parseInt(c.hex.slice(3, 5), 16), cb = parseInt(c.hex.slice(5, 7), 16);
+    const d = (r - cr) * (r - cr) * 0.3 + (g - cg) * (g - cg) * 0.59 + (b - cb) * (b - cb) * 0.11;
+    if (d < bestD) { bestD = d; best = c.id; }
+  });
+  return best;
+}
+function canvasColor(c) {
+  if (!c) return 'none';
+  const key = String(c).trim().toLowerCase();
+  if (CANVAS_PRESET[key]) return CANVAS_PRESET[key];
+  if (KNOWN_HEX[key]) return KNOWN_HEX[key];
+  return nearestColor(c);
+}
+
+/* ---------------------- OrgPad (.orgpage / EDN) ---------------------- */
+function orgpageToDoc(text, fallbackName) {
+  let root;
+  try { root = parseEDN(text); } catch (e) { return null; }
+  const units = root && root[':orgpage/units'];
+  if (!units || typeof units !== 'object') return null;
+
+  const doc = newDoc(root[':orgpage/title'] || fallbackName || 'Mapa z OrgPadu');
+  const idMap = Object.create(null);
+  const books = [];
+
+  Object.keys(units).forEach((uid) => {
+    const u = units[uid];
+    if (!u || u[':unit/type'] !== ':unit/book') return;
+    books.push(uid);
+    const pos = Array.isArray(u[':unit/pos']) ? u[':unit/pos'] : [0, 0];
+    const n = newNode(Math.round(pos[0]), Math.round(pos[1]), u[':unit/title'] || '');
+    n.shape = 'card';
+    n.w = 240;
+
+    const parts = [];
+    const kids = u[':unit/child-unit-ids'] || [];
+    kids.forEach((kid) => {
+      const pg = units[kid];
+      if (pg && pg[':unit/content']) {
+        const md = hiccupBlocks(pg[':unit/content'], 0).replace(/^\n+|\s+$/g, '');
+        if (md) parts.push(md);
+      }
+    });
+    if (u[':unit/content']) {
+      const md = hiccupBlocks(u[':unit/content'], 0).replace(/^\n+|\s+$/g, '');
+      if (md) parts.push(md);
+    }
+    n.content = parts.join('\n\n').trim();
+    n.open = !!n.content;
+
+    const props = u[':unit/props'] || {};
+    n.color = orgColor(props[':props/color']);
+    if (props[':props/title-size'] === ':props/h1') n.w = 280;
+
+    idMap[uid] = n.id;
+    doc.nodes.push(n);
+  });
+
+  /* vazby */
+  const links = root[':orgpage/links'] || {};
+  Object.keys(links).forEach((lid) => {
+    const l = links[lid];
+    const ep = l && l[':link/endpoint-ids'];
+    if (!Array.isArray(ep) || ep.length < 2) return;
+    const a = idMap[ep[0]], b = idMap[ep[1]];
+    if (!a || !b || a === b) return;
+    const e = newEdge(a, b);
+    const props = l[':link/props'] || {};
+    const head = props[':props/arrowhead'];
+    e.arrow = head === ':props/single' ? 'to' : (head === ':props/double' || head === ':props/both') ? 'both' : 'none';
+    e.style = props[':props/dashed'] ? 'dashed' : 'solid';
+    e.color = orgColor(props[':props/color']);
+    if (typeof l[':link/title'] === 'string') e.label = l[':link/title'];
+    doc.edges.push(e);
+  });
+
+  /* zanořené jednotky v OrgPadu spojíme čárou rodič -> dítě */
+  books.forEach((uid) => {
+    const u = units[uid];
+    const par = u[':unit/parent-id'];
+    if (!par || !idMap[par] || !idMap[uid]) return;
+    const a = idMap[par], b = idMap[uid];
+    if (doc.edges.some((e) => (e.from === a && e.to === b) || (e.from === b && e.to === a))) return;
+    const e = newEdge(a, b);
+    e.style = 'solid'; e.arrow = 'to'; e.color = 'none';
+    doc.edges.push(e);
+  });
+
+  return doc.nodes.length ? doc : null;
+}
+
+/* ---------------------- JSON Canvas (.canvas) ---------------------- */
+function canvasToDoc(text, fallbackName) {
+  let o;
+  try { o = JSON.parse(text); } catch (e) { return null; }
+  if (!o || !Array.isArray(o.nodes)) return null;
+
+  const doc = newDoc(fallbackName || 'Mapa z Canvasu');
+  const idMap = Object.create(null);
+
+  o.nodes.forEach((cn) => {
+    if (!cn || typeof cn !== 'object') return;
+    let title = '', content = '';
+    if (cn.type === 'file') {
+      title = String(cn.file || '').split('/').pop().replace(/\.[^.]+$/, '');
+      content = cn.file ? '`' + cn.file + '`' : '';
+    } else if (cn.type === 'link') {
+      title = String(cn.url || '').replace(/^https?:\/\//, '').split('/')[0];
+      content = cn.url ? '[' + cn.url + '](' + cn.url + ')' : '';
+    } else if (cn.type === 'group') {
+      title = cn.label || 'Skupina';
+    } else {
+      const t = String(cn.text || '').replace(/\r\n?/g, '\n').trim();
+      const lines = t.split('\n');
+      const h = /^(#{1,6})\s+(.*)$/.exec(lines[0] || '');
+      if (h) { title = h[2].trim(); content = lines.slice(1).join('\n').trim(); }
+      else if (lines.length === 1) { title = t.slice(0, 140); }
+      else if (lines[0].length <= 70) { title = lines[0].trim(); content = lines.slice(1).join('\n').trim(); }
+      else { content = t; }
+    }
+    const n = newNode(Math.round(Number(cn.x) || 0), Math.round(Number(cn.y) || 0), title);
+    n.shape = cn.type === 'group' ? 'plain' : 'card';
+    n.content = content;
+    n.open = !!content;
+    const w = Number(cn.width) || 0;
+    n.w = w >= 110 ? clamp(Math.round(w), 110, 560) : 240;
+    n.color = canvasColor(cn.color);
+    idMap[cn.id] = n.id;
+    doc.nodes.push(n);
+  });
+
+  (Array.isArray(o.edges) ? o.edges : []).forEach((ce) => {
+    if (!ce) return;
+    const a = idMap[ce.fromNode], b = idMap[ce.toNode];
+    if (!a || !b || a === b) return;
+    const e = newEdge(a, b);
+    const toArrow = ce.toEnd !== 'none';       // podle specifikace je výchozí šipka na cíli
+    const fromArrow = ce.fromEnd === 'arrow';
+    e.arrow = (toArrow && fromArrow) ? 'both' : toArrow ? 'to' : 'none';
+    e.style = 'solid';
+    e.label = typeof ce.label === 'string' ? ce.label : '';
+    e.color = canvasColor(ce.color);
+    doc.edges.push(e);
+  });
+
+  return doc.nodes.length ? doc : null;
+}
+
+/* ---------------------- rozcestník ---------------------- */
+const IMPORT_EXT = /\.(json|mapa\.json|canvas|orgpage|edn)$/i;
+
+/** rozpozná formát a vrátí dokument, nebo null */
+async function importAnyToDoc(text, filename) {
+  const base = String(filename || '').replace(/\.[^.]+$/, '');
+  const t = text.replace(/^﻿/, '').trim();
+
+  if (/\.orgpage$|\.edn$/i.test(filename || '') || /^\{\s*:orgpage\//.test(t)) {
+    return orgpageToDoc(t, base);
+  }
+  if (/\.canvas$/i.test(filename || '')) {
+    return canvasToDoc(t, base);
+  }
+  /* .json – nejdřív náš formát, pak Canvas */
+  const own = await textToDoc(t);
+  if (own && (own.locked || own.nodes)) return own;
+  return canvasToDoc(t, base);
 }
 
 /* ---- 15-crypt.js ---- */
@@ -1415,19 +1780,21 @@ const Store = {
     return this.createFrom(doc);
   },
 
-  /* --- import souborů z disku (funguje všude) --- */
+  /* --- import souborů z disku (.mapa.json, .canvas, .orgpage, .edn) --- */
   async importFiles(fileList) {
-    let n = 0;
+    let n = 0, skipped = 0;
     for (const file of fileList) {
-      if (!/\.json$/i.test(file.name)) continue;
+      if (file.size > 25 * 1024 * 1024) { skipped++; continue; }
       try {
-        const doc = await textToDoc(await file.text());
-        if (!doc || doc.locked) continue;
+        const doc = await importAnyToDoc(await file.text(), file.name);
+        if (!doc || doc.locked || !doc.nodes || !doc.nodes.length) { skipped++; continue; }
         doc.id = uid('map');
+        doc.created = doc.modified = Date.now();
         await this.createFrom(doc);
         n++;
-      } catch (e) { /* ignoruj */ }
+      } catch (e) { console.warn('import selhal:', file.name, e); skipped++; }
     }
+    this.lastImportSkipped = skipped;
     return n;
   },
 
@@ -3791,6 +4158,17 @@ async function manualSave() {
   else { toast('Uloženo do prohlížeče – stahuji kopii'); downloadDoc(App.doc, App.entry.name); }
 }
 
+async function doImport(files) {
+  if (!files || !files.length) return;
+  toast('Načítám ' + files.length + ' ' + plural(files.length, 'soubor', 'soubory', 'souborů') + '…');
+  let n = 0;
+  try { n = await Store.importFiles(files); }
+  catch (err) { toast('Import selhal: ' + (err && err.message ? err.message : err), 5000); return; }
+  renderLibrary();
+  if (n) toast('Naimportováno ' + n + ' ' + plural(n, 'mapa', 'mapy', 'map'));
+  else toast('V souborech nebyla nalezena žádná mapa (umím .mapa.json, .canvas, .orgpage, .edn)', 5000);
+}
+
 /* ----------------------------- Google Disk -------------------------------- */
 async function connectDrive() {
   if (Store.drive) {
@@ -3875,7 +4253,12 @@ function showHelp() {
         '<kbd>Ctrl + S</kbd><span>uložit hned</span>' +
         '<kbd>tlačítko ⟳ nahoře</kbd><span>hned zkontrolovat změny z úložiště</span>' +
       '</div>' +
-      '<p class="tiny" style="margin-top:14px">Když mapy ukládáš na Google Disk (nebo do složky, kterou synchronizuje jiná služba), ' +
+      '<p class="tiny" style="margin-top:14px">Mapy z <strong>OrgPadu</strong> naimportuješ tlačítkem ' +
+      '<strong>Importovat mapu</strong> nebo prostým přetažením souboru do knihovny. ' +
+      'Umím export <code>.orgpage</code> (EDN) i <code>.canvas</code> (JSON Canvas) – ' +
+      '<strong>.orgpage je věrnější</strong>, protože si drží strukturu odrážek, oddělený název a barvy. ' +
+      'Přenese se rozmístění, barvy, obsah buněk i vazby včetně šipek.</p>' +
+      '<p class="tiny" style="margin-top:10px">Když mapy ukládáš na Google Disk (nebo do složky, kterou synchronizuje jiná služba), ' +
       'aplikace si každých pár desítek vteřin sama ověří, jestli se něco nezměnilo na druhém zařízení, a rovnou to načte. ' +
       'Kontroluje i po přepnutí zpátky do okna. Pokud máš zrovna něco rozdělaného, zeptá se, kterou verzi si necháš.</p>' +
       '<p class="tiny" style="margin-top:10px">Jak má vypadat každá nově vytvořená vazba (šipka, čára, barva) ' +
@@ -3946,10 +4329,17 @@ async function init() {
   $('#btnDrive').addEventListener('click', connectDrive);
   $('#btnImport').addEventListener('click', () => $('#fileImport').click());
   $('#fileImport').addEventListener('change', async (e) => {
-    const n = await Store.importFiles(e.target.files);
+    await doImport(e.target.files);
     e.target.value = '';
-    renderLibrary();
-    toast(n ? 'Načteno ' + n + ' ' + plural(n, 'mapa', 'mapy', 'map') : 'Žádná mapa v souborech nebyla nalezena');
+  });
+
+  /* přetažení souborů rovnou do knihovny */
+  const lib = $('#library');
+  lib.addEventListener('dragover', (ev) => { ev.preventDefault(); lib.classList.add('dropping'); });
+  lib.addEventListener('dragleave', (ev) => { if (ev.target === lib) lib.classList.remove('dropping'); });
+  lib.addEventListener('drop', async (ev) => {
+    ev.preventDefault(); lib.classList.remove('dropping');
+    if (ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files.length) await doImport(ev.dataTransfer.files);
   });
   $('#dirImport').addEventListener('change', async (e) => {
     const n = await Store.importFiles(e.target.files);

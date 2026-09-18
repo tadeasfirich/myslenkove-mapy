@@ -174,7 +174,33 @@ repozitáře. Změna se občas projeví až za pár minut.
 
 ---
 
-## 6. Formát souboru
+## 6. Import map z OrgPadu
+
+V knihovně klikni na **Importovat mapu** (nebo soubor prostě přetáhni do okna).
+Aplikace umí obě věci, které OrgPad nabízí:
+
+| Formát | Přípona | Co přenese |
+| --- | --- | --- |
+| **EDN (doporučeno)** | `.orgpage` | názvy, obsah **se strukturou odrážek včetně zanoření**, odkazy, barvy podle jména, pozice, vazby se šipkami a barvou |
+| JSON Canvas | `.canvas` | názvy, pozice, barvy, vazby se šipkami – ale obsah jen jako slepený text |
+
+**Proč je EDN méně ztrátový:** OrgPad v něm ukládá obsah buňky jako skutečný strom
+(`[:ul [:li "Data co tam dám" [:ul [:li "Může být soubor"]]]]`), takže se odrážky
+i jejich zanoření dají obnovit přesně. Export do `.canvas` proti tomu obsah zplošťuje
+do jednoho řetězce a sousední odrážky se slepí dohromady – v reálném exportu z toho
+vyjde třeba `Systémový promptData co tam dám`. Navíc `.canvas` z OrgPadu uvádí u všech
+buněk rozměr 50×50 (skutečné šířky se ztrácejí) a název buňky je jen řádek `## Název`
+uvnitř textu.
+
+Používej tedy `.orgpage`; `.canvas` je dobré leda pro mapy bez obsahu v buňkách,
+nebo když jdeš opačným směrem do Obsidianu.
+
+Po importu je z mapy běžný soubor `*.mapa.json`, takže se dál ukládá a synchronizuje
+jako každá jiná.
+
+---
+
+## 7. Formát souboru
 
 `*.mapa.json` je obyčejný čitelný JSON. Vedle textu drží i kompletní rozmístění:
 souřadnice, šířku a výšku každé buňky, stav rozbalení obsahu, pořadí vykreslení
