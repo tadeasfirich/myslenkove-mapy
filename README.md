@@ -102,6 +102,36 @@ Při prvním přihlášení se může objevit hláška, že aplikaci Google neov
 
 ---
 
+## 3.6 Když to má používat i někdo další
+
+Důležité je, že **ID klienta neidentifikuje člověka, ale aplikaci**. Mapy se vždycky
+ukládají na Disk toho, kdo je zrovna přihlášený – nikdo nevidí cizí mapy a nikdo je
+nemá u sebe. Každý má vlastní složku na vlastním Disku.
+
+Podle toho jsou tři cesty:
+
+**A) Nejjednodušší – přidáš kolegu mezi testery (nic dalšího nedělá).**
+V Google Cloud → **Audience → Test users → + Add users** napíšeš jeho Gmail.
+Pak mu stačí poslat odkaz na tvoji stránku, klikne na **Google Disk**, přihlásí se
+svým účtem a hotovo – ukládá si do svého Disku. Takhle jde přidat až 100 lidí.
+
+**B) Zveřejníš aplikaci (pro kohokoli).**
+V **Audience** dáš **Publish app**. Pak může přijít kdokoli s účtem Google a seznam
+testerů neřešíš. Ověření Googlem se nevyžaduje, protože aplikace používá jen
+nesensitivní rozsah `drive.file`.
+
+**C) Kolega si udělá vlastní ID klienta.**
+Když nechce být závislý na tvém projektu, projde si sám body 3.1–3.3. Do
+**Authorized JavaScript origins** zadá **tvoji** adresu (`https://TVOJE-JMENO.github.io`) –
+Google umožňuje, aby stejnou adresu mělo zaregistrovanou víc projektů. Svoje ID pak
+vloží v aplikaci pod ozubeným kolečkem; uloží se jen do jeho prohlížeče a má přednost
+před tím, co je v `config.js`. Tvého projektu se to nijak nedotkne.
+
+Vlastní kopii na svém GitHubu potřebuje jen tehdy, když chce vlastní adresu – ID klienta
+je totiž vždy svázané s adresou, ze které se stránka otevírá.
+
+---
+
 ## 4. Když to nejede
 
 ### „Přístup zablokován: aplikace … neprošla procesem ověření Googlem“ (chyba 403: access_denied)
