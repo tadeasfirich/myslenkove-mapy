@@ -228,7 +228,16 @@ a.btn{text-decoration:none;color:var(--fg)}
 .port:hover{transform:scale(1.35)}
 .port.t{top:-8px;left:calc(50% - 7.5px)} .port.b{bottom:-8px;left:calc(50% - 7.5px)}
 .port.l{left:-8px;top:calc(50% - 7.5px)} .port.r{right:-8px;top:calc(50% - 7.5px)}
+/* na všech zařízeních s dotykem: buňka si nesmí ukrást tah kvůli rolování obsahu */
+@media (any-pointer:coarse){
+  .node{touch-action:none}
+  .n-body{max-height:none;overflow:visible}
+}
 @media (pointer:coarse){
+  /* vybranou buňku jde uchopit kdekoli, i za obsah */
+  .node.sel .n-head,.node.sel .n-body{cursor:grab}
+  .node.sel .n-body{-webkit-user-select:none;user-select:none}
+  .node.dragging{opacity:.92;box-shadow:0 0 0 3px var(--accent-soft),var(--shadow-3)}
   .port{width:22px;height:22px;opacity:0;pointer-events:none}
   .node:hover .port{opacity:0;pointer-events:none}
   .node.sel .port{opacity:1;pointer-events:auto}
@@ -2524,6 +2533,15 @@ function scheduleSave() {
 }
 async function saveNow() { doSave.cancel(); syncSizes(); await Store.write(App.entry).catch(() => {}); setSaveState('Uloženo ' + fmtDate(Date.now()), false); }
 
+/** jednorázové vysvětlení, jak se na dotyku posouvají buňky */
+function hintTouchDrag() {
+  try {
+    if (localStorage.getItem('mm.hint.touchdrag')) return;
+    localStorage.setItem('mm.hint.touchdrag', '1');
+  } catch (e) { /* soukromé okno */ }
+  toast('Vybranou buňku teď posuneš tažením za kteroukoli její část', 4000);
+}
+
 /* ----------------------------- operace ----------------------------------- */
 function addNode(x, y, opts) {
   pushUndo();
@@ -2655,6 +2673,13 @@ function stopEditTitle(save) {
 /* ============================================================
    Ukazovátko (myš i dotyk)
    ============================================================ */
+/** dotyk nebo pero (na nich platí „nejdřív vyber, pak posouvej“) */
+function isTouchPointer(ev) {
+  if (ev.pointerType === 'touch' || ev.pointerType === 'pen') return true;
+  if (!ev.pointerType && matchMedia('(pointer: coarse)').matches) return true;
+  return false;
+}
+
 const pointers = new Map();
 let gesture = null;   // {type, ...}
 let pinch = null;
@@ -2800,8 +2825,30 @@ function onPointerDown(ev) {
     }
     if (ev.target.closest('.n-toggle')) { gesture = { type: 'none' }; return; }
     if (ev.target.closest('a')) { gesture = { type: 'none' }; return; }
+    if (ev.target.closest('.md-cb')) { gesture = { type: 'none' }; return; }
+
+    /* ---- prst nebo pero: napřed vyber, pak posouvej (a to celou buňkou) ---- */
+    if (isTouchPointer(ev)) {
+      if (!App.sel.has(id)) {
+        /* nevybraná buňka se chová jako plátno – tažením se jen posouvá mapa,
+           krátké ťuknutí ji vybere */
+        gesture = { type: 'pan', sx: ev.clientX, sy: ev.clientY,
+          vx: view().x, vy: view().y, tapNode: id, moved: false };
+        els.canvas.classList.add('panning');
+        return;
+      }
+      if (editingEl) { gesture = { type: 'none' }; return; }
+      ev.preventDefault();
+      lastSnap = snapshot();
+      const startT = {};
+      App.sel.forEach((sid) => { const n = getNode(sid); if (n) startT[sid] = { x: n.x, y: n.y }; });
+      gesture = { type: 'drag', sx: ev.clientX, sy: ev.clientY, start: startT, moved: false, id };
+      nodeEl.classList.add('dragging');
+      return;
+    }
+
     if (ev.target.closest('.n-body') && !ev.target.closest('.n-head')) {
-      // v obsahu smí uživatel značit text
+      // myší smí uživatel v obsahu značit text
       if (!App.sel.has(id)) setSel(id, ev.shiftKey);
       gesture = { type: 'none' };
       return;
@@ -2859,6 +2906,7 @@ function onPointerMove(ev) {
 
   if (g.type === 'pan') {
     const v = view();
+    if (Math.abs(ev.clientX - g.sx) + Math.abs(ev.clientY - g.sy) > 8) g.moved = true;
     v.x = g.vx + (ev.clientX - g.sx);
     v.y = g.vy + (ev.clientY - g.sy);
     applyView();
@@ -2924,7 +2972,12 @@ async function onPointerUp(ev) {
 
   if (g.type === 'pan') {
     els.canvas.classList.remove('panning');
-    scheduleSave();
+    if (g.tapNode && !g.moved) {
+      setSel(g.tapNode);
+      hintTouchDrag();
+    } else {
+      scheduleSave();
+    }
   } else if (g.type === 'drag') {
     const el = nodeEls.get(g.id); if (el) el.classList.remove('dragging');
     if (g.moved) { App.undoStack.push(lastSnap); App.redoStack.length = 0; updateHistoryButtons(); scheduleSave(); }
@@ -4248,6 +4301,8 @@ function showHelp() {
         '<kbd>Shift + klik na vazbu</kbd><span>přidat vazbu do výběru</span>' +
         '<kbd>pravý klik na buňku</kbd><span>„Vybrat vazby této buňky“ – pak je uprav najednou</span>' +
         '<kbd>tažení plátna / mezerník</kbd><span>posun mapy</span>' +
+        '<kbd>na mobilu: ťuknutí</kbd><span>vybere buňku – teprve pak ji jde táhnout, a to za kteroukoli část</span>' +
+        '<kbd>na mobilu: tažení</kbd><span>přes nevybranou buňku posouvá mapu</span>' +
         '<kbd>kolečko myši, dva prsty</kbd><span>přiblížení</span>' +
         '<kbd>F</kbd><span>vycentrovat celou mapu</span>' +
         '<kbd>Ctrl + S</kbd><span>uložit hned</span>' +
