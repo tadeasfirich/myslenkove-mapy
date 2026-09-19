@@ -173,7 +173,7 @@ a.btn{text-decoration:none;color:var(--fg)}
 
 /* ---------- node ---------- */
 .node{
-  position:absolute;background:var(--bg-2);border:1.5px solid var(--line-2);
+  position:absolute;touch-action:none;background:var(--bg-2);border:1.5px solid var(--line-2);
   border-radius:var(--r-m);box-shadow:var(--shadow-1);
   display:flex;flex-direction:column;
   transition:box-shadow .12s,border-color .12s;
@@ -228,14 +228,14 @@ a.btn{text-decoration:none;color:var(--fg)}
 .port:hover{transform:scale(1.35)}
 .port.t{top:-8px;left:calc(50% - 7.5px)} .port.b{bottom:-8px;left:calc(50% - 7.5px)}
 .port.l{left:-8px;top:calc(50% - 7.5px)} .port.r{right:-8px;top:calc(50% - 7.5px)}
-/* na všech zařízeních s dotykem: buňka si nesmí ukrást tah kvůli rolování obsahu */
+/* na dotykových zařízeních nerolujeme uvnitř buňky – tah patří mapě nebo buňce */
 @media (any-pointer:coarse){
-  .node{touch-action:none}
   .n-body{max-height:none;overflow:visible}
 }
+/* vybranou buňku jde uchopit kdekoli, i za obsah */
+.node.sel .n-head,.node.sel .n-body,.node.sel .n-img{cursor:grab}
+.node.sel.dragging .n-head,.node.sel.dragging .n-body{cursor:grabbing}
 @media (pointer:coarse){
-  /* vybranou buňku jde uchopit kdekoli, i za obsah */
-  .node.sel .n-head,.node.sel .n-body{cursor:grab}
   .node.sel .n-body{-webkit-user-select:none;user-select:none}
   .node.dragging{opacity:.92;box-shadow:0 0 0 3px var(--accent-soft),var(--shadow-3)}
   .port{width:22px;height:22px;opacity:0;pointer-events:none}
@@ -314,7 +314,7 @@ a.btn{text-decoration:none;color:var(--fg)}
   width:min(560px,100%);max-height:86dvh;overflow:auto;border:1px solid var(--line)}
 .modal header{padding:16px 18px 0;font-size:17px;font-weight:700;letter-spacing:-.01em}
 .modal .mbody{padding:12px 18px}
-.modal footer{padding:12px 18px 16px;display:flex;gap:8px;justify-content:flex-end}
+.modal footer{padding:12px 18px 16px;display:flex;gap:8px;justify-content:flex-end;align-items:center}
 .kbd-list{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;font-size:13.5px;align-items:center}
 kbd{font-family:var(--mono);font-size:12px;background:var(--bg-3);border:1px solid var(--line);
   border-bottom-width:2px;border-radius:5px;padding:1px 6px;white-space:nowrap}
@@ -530,6 +530,9 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--bg-3);border:1px sol
    Myšlenkové mapy – utilitky
    ============================================================ */
 'use strict';
+
+/* verze sestavení – pomůže poznat, jestli prohlížeč nemá načtenou starou kopii */
+const APP_VERSION = '19. 9. 2026 · v7';
 
 const $  = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -2673,11 +2676,18 @@ function stopEditTitle(save) {
 /* ============================================================
    Ukazovátko (myš i dotyk)
    ============================================================ */
+/** poznáme, že zařízení opravdu používá dotyk (některé prohlížeče pointerType zamlčí) */
+let SAW_TOUCH = false;
+try {
+  window.addEventListener('touchstart', () => { SAW_TOUCH = true; }, { capture: true, passive: true });
+} catch (e) { /* starý prohlížeč */ }
+
 /** dotyk nebo pero (na nich platí „nejdřív vyber, pak posouvej“) */
 function isTouchPointer(ev) {
+  if (ev.pointerType === 'mouse') return false;
   if (ev.pointerType === 'touch' || ev.pointerType === 'pen') return true;
-  if (!ev.pointerType && matchMedia('(pointer: coarse)').matches) return true;
-  return false;
+  if (SAW_TOUCH) return true;
+  try { return matchMedia('(any-pointer: coarse)').matches; } catch (e) { return false; }
 }
 
 const pointers = new Map();
@@ -2827,45 +2837,54 @@ function onPointerDown(ev) {
     if (ev.target.closest('a')) { gesture = { type: 'none' }; return; }
     if (ev.target.closest('.md-cb')) { gesture = { type: 'none' }; return; }
 
-    /* ---- prst nebo pero: napřed vyber, pak posouvej (a to celou buňkou) ---- */
-    if (isTouchPointer(ev)) {
-      if (!App.sel.has(id)) {
-        /* nevybraná buňka se chová jako plátno – tažením se jen posouvá mapa,
-           krátké ťuknutí ji vybere */
-        gesture = { type: 'pan', sx: ev.clientX, sy: ev.clientY,
-          vx: view().x, vy: view().y, tapNode: id, moved: false };
-        els.canvas.classList.add('panning');
+    const touch = isTouchPointer(ev);
+    const selected = App.sel.has(id);
+
+    const beginDrag = () => {
+      ev.preventDefault();
+      try { const s = getSelection(); if (s && s.removeAllRanges) s.removeAllRanges(); } catch (e) {}
+      lastSnap = snapshot();
+      const start = {};
+      App.sel.forEach((sid) => { const n = getNode(sid); if (n) start[sid] = { x: n.x, y: n.y }; });
+      gesture = { type: 'drag', sx: ev.clientX, sy: ev.clientY, start, moved: false, id };
+      nodeEl.classList.add('dragging');
+    };
+
+    /* ---- 1) VYBRANOU buňku lze chytit kdekoli – prstem i myší ----
+       (Alt + tažení myší nechává v obsahu značit text) */
+    if (selected && !(ev.altKey && !touch)) {
+      if (ev.shiftKey || ev.metaKey || ev.ctrlKey) {
+        App.sel.delete(id); refreshSelection();
+        gesture = { type: 'none' };
         return;
       }
       if (editingEl) { gesture = { type: 'none' }; return; }
-      ev.preventDefault();
-      lastSnap = snapshot();
-      const startT = {};
-      App.sel.forEach((sid) => { const n = getNode(sid); if (n) startT[sid] = { x: n.x, y: n.y }; });
-      gesture = { type: 'drag', sx: ev.clientX, sy: ev.clientY, start: startT, moved: false, id };
-      nodeEl.classList.add('dragging');
+      beginDrag();
       return;
     }
 
+    /* ---- 2) NEVYBRANÁ buňka na dotyku: ťuknutí vybere, tažení posouvá mapu ---- */
+    if (touch) {
+      gesture = { type: 'pan', sx: ev.clientX, sy: ev.clientY,
+        vx: view().x, vy: view().y, tapNode: id, moved: false };
+      els.canvas.classList.add('panning');
+      return;
+    }
+
+    /* ---- 3) NEVYBRANÁ buňka pod myší: jako dřív ---- */
     if (ev.target.closest('.n-body') && !ev.target.closest('.n-head')) {
-      // myší smí uživatel v obsahu značit text
-      if (!App.sel.has(id)) setSel(id, ev.shiftKey);
+      setSel(id, ev.shiftKey);
       gesture = { type: 'none' };
       return;
     }
     if (ev.shiftKey || ev.metaKey || ev.ctrlKey) {
-      if (App.sel.has(id)) App.sel.delete(id); else App.sel.add(id);
+      App.sel.add(id);
       refreshSelection();
-    } else if (!App.sel.has(id)) {
+    } else {
       setSel(id);
     }
     if (editingEl) return;
-    ev.preventDefault();
-    lastSnap = snapshot();
-    const start = {};
-    App.sel.forEach((sid) => { const n = getNode(sid); if (n) start[sid] = { x: n.x, y: n.y }; });
-    gesture = { type: 'drag', sx: ev.clientX, sy: ev.clientY, start, moved: false, id };
-    nodeEl.classList.add('dragging');
+    beginDrag();
     return;
   }
   /* 5) prázdné plátno */
@@ -3704,7 +3723,8 @@ function showSettings() {
         : '<p class="tiny">Tenhle prohlížeč neumí WebCrypto, šifrování není k dispozici.</p>') +
       '<p class="tiny" id="setMsg" style="margin-top:10px"></p>' +
     '</div>' +
-    '<footer><button class="btn primary" id="setOk">Hotovo</button></footer>';
+    '<footer><span class="tiny" style="margin-right:auto">Verze ' + esc(APP_VERSION) + '</span>' +
+    '<button class="btn primary" id="setOk">Hotovo</button></footer>';
 
   modal(html, (root, close) => {
     const msg = $('#setMsg', root);
@@ -4303,6 +4323,7 @@ function showHelp() {
         '<kbd>tažení plátna / mezerník</kbd><span>posun mapy</span>' +
         '<kbd>na mobilu: ťuknutí</kbd><span>vybere buňku – teprve pak ji jde táhnout, a to za kteroukoli část</span>' +
         '<kbd>na mobilu: tažení</kbd><span>přes nevybranou buňku posouvá mapu</span>' +
+        '<kbd>Alt + tažení myší</kbd><span>označí text v obsahu místo posunu buňky</span>' +
         '<kbd>kolečko myši, dva prsty</kbd><span>přiblížení</span>' +
         '<kbd>F</kbd><span>vycentrovat celou mapu</span>' +
         '<kbd>Ctrl + S</kbd><span>uložit hned</span>' +
@@ -4323,7 +4344,8 @@ function showHelp() {
       'přímo do vybrané složky – včetně pozic buněk, šířek, stavu rozbalení obsahu i posunu a přiblížení plátna. ' +
       'Po znovuotevření tedy mapa vypadá přesně tak, jak jsi ji opustil.</p>' +
     '</div>' +
-    '<footer><button class="btn primary" id="helpOk">Rozumím</button></footer></div>';
+    '<footer><span class="tiny" style="margin-right:auto">Verze ' + esc(APP_VERSION) + '</span>' +
+    '<button class="btn primary" id="helpOk">Rozumím</button></footer></div>';
   document.body.appendChild(scrim);
   const close = () => scrim.remove();
   scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
@@ -4332,6 +4354,7 @@ function showHelp() {
 
 /* ----------------------------- start ------------------------------------- */
 async function init() {
+  console.log('Myšlenkové mapy – verze ' + APP_VERSION);
   cacheEls();
   initTheme();
   initCanvasEvents();
