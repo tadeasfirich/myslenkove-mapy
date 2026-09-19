@@ -232,10 +232,10 @@ a.btn{text-decoration:none;color:var(--fg)}
 @media (any-pointer:coarse){
   .n-body{max-height:none;overflow:visible}
 }
-/* vybranou buňku jde uchopit kdekoli, i za obsah */
-.node.sel .n-head,.node.sel .n-body,.node.sel .n-img{cursor:grab}
-.node.sel.dragging .n-head,.node.sel.dragging .n-body{cursor:grabbing}
 @media (pointer:coarse){
+  /* vybranou buňku jde uchopit kdekoli, i za obsah */
+  .node.sel .n-head,.node.sel .n-body,.node.sel .n-img{cursor:grab}
+  .node.sel.dragging .n-head,.node.sel.dragging .n-body{cursor:grabbing}
   .node.sel .n-body{-webkit-user-select:none;user-select:none}
   .node.dragging{opacity:.92;box-shadow:0 0 0 3px var(--accent-soft),var(--shadow-3)}
   .port{width:22px;height:22px;opacity:0;pointer-events:none}
@@ -532,7 +532,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--bg-3);border:1px sol
 'use strict';
 
 /* verze sestavení – pomůže poznat, jestli prohlížeč nemá načtenou starou kopii */
-const APP_VERSION = '19. 9. 2026 · v7';
+const APP_VERSION = '19. 9. 2026 · v8';
 
 const $  = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -2837,12 +2837,13 @@ function onPointerDown(ev) {
     if (ev.target.closest('a')) { gesture = { type: 'none' }; return; }
     if (ev.target.closest('.md-cb')) { gesture = { type: 'none' }; return; }
 
+    /* Myš a prst se chovají každý po svém – rozlišujeme podle typu události. */
     const touch = isTouchPointer(ev);
     const selected = App.sel.has(id);
 
     const beginDrag = () => {
       ev.preventDefault();
-      try { const s = getSelection(); if (s && s.removeAllRanges) s.removeAllRanges(); } catch (e) {}
+      try { const sel = getSelection(); if (sel && sel.removeAllRanges) sel.removeAllRanges(); } catch (e) {}
       lastSnap = snapshot();
       const start = {};
       App.sel.forEach((sid) => { const n = getNode(sid); if (n) start[sid] = { x: n.x, y: n.y }; });
@@ -2850,9 +2851,16 @@ function onPointerDown(ev) {
       nodeEl.classList.add('dragging');
     };
 
-    /* ---- 1) VYBRANOU buňku lze chytit kdekoli – prstem i myší ----
-       (Alt + tažení myší nechává v obsahu značit text) */
-    if (selected && !(ev.altKey && !touch)) {
+    /* ============ PRST / PERO ============
+       Nevybraná buňka se chová jako plátno (tažením se posouvá mapa, ťuknutí ji vybere),
+       vybranou buňku pak jde chytit kdekoli – za nadpis, poznámku i obrázek. */
+    if (touch) {
+      if (!selected) {
+        gesture = { type: 'pan', sx: ev.clientX, sy: ev.clientY,
+          vx: view().x, vy: view().y, tapNode: id, moved: false };
+        els.canvas.classList.add('panning');
+        return;
+      }
       if (ev.shiftKey || ev.metaKey || ev.ctrlKey) {
         App.sel.delete(id); refreshSelection();
         gesture = { type: 'none' };
@@ -2863,24 +2871,17 @@ function onPointerDown(ev) {
       return;
     }
 
-    /* ---- 2) NEVYBRANÁ buňka na dotyku: ťuknutí vybere, tažení posouvá mapu ---- */
-    if (touch) {
-      gesture = { type: 'pan', sx: ev.clientX, sy: ev.clientY,
-        vx: view().x, vy: view().y, tapNode: id, moved: false };
-      els.canvas.classList.add('panning');
-      return;
-    }
-
-    /* ---- 3) NEVYBRANÁ buňka pod myší: jako dřív ---- */
+    /* ============ MYŠ ============
+       Buňka se dá táhnout rovnou, bez předchozího výběru; v poznámce jde značit text. */
     if (ev.target.closest('.n-body') && !ev.target.closest('.n-head')) {
-      setSel(id, ev.shiftKey);
+      if (!selected) setSel(id, ev.shiftKey);
       gesture = { type: 'none' };
       return;
     }
     if (ev.shiftKey || ev.metaKey || ev.ctrlKey) {
-      App.sel.add(id);
+      if (selected) App.sel.delete(id); else App.sel.add(id);
       refreshSelection();
-    } else {
+    } else if (!selected) {
       setSel(id);
     }
     if (editingEl) return;
@@ -4321,9 +4322,9 @@ function showHelp() {
         '<kbd>Shift + klik na vazbu</kbd><span>přidat vazbu do výběru</span>' +
         '<kbd>pravý klik na buňku</kbd><span>„Vybrat vazby této buňky“ – pak je uprav najednou</span>' +
         '<kbd>tažení plátna / mezerník</kbd><span>posun mapy</span>' +
-        '<kbd>na mobilu: ťuknutí</kbd><span>vybere buňku – teprve pak ji jde táhnout, a to za kteroukoli část</span>' +
-        '<kbd>na mobilu: tažení</kbd><span>přes nevybranou buňku posouvá mapu</span>' +
-        '<kbd>Alt + tažení myší</kbd><span>označí text v obsahu místo posunu buňky</span>' +
+        '<kbd>myší</kbd><span>buňku chytíš rovnou za hlavičku, v poznámce jde značit text</span>' +
+        '<kbd>prstem: ťuknutí</kbd><span>vybere buňku – teprve pak ji jde táhnout, a to za kteroukoli část</span>' +
+        '<kbd>prstem: tažení</kbd><span>přes nevybranou buňku posouvá mapu</span>' +
         '<kbd>kolečko myši, dva prsty</kbd><span>přiblížení</span>' +
         '<kbd>F</kbd><span>vycentrovat celou mapu</span>' +
         '<kbd>Ctrl + S</kbd><span>uložit hned</span>' +
