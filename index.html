@@ -211,8 +211,9 @@ a.btn{text-decoration:none;color:var(--fg)}
 .n-body{border-radius:0 0 9px 9px}
 .n-body{
   border-top:1px dashed var(--line);padding:9px 11px 11px;font-size:13.5px;
-  color:var(--fg-2);overflow:auto;max-height:420px;cursor:auto;
+  color:var(--fg-2);overflow:auto;max-height:420px;cursor:grab;
 }
+.node.dragging .n-body,.node.dragging .n-head{cursor:grabbing}
 .n-body.empty-hint{color:var(--fg-3);font-style:italic}
 .n-badge{position:absolute;right:6px;bottom:4px;font-size:10px;color:var(--fg-3)}
 .n-resize{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;
@@ -228,10 +229,9 @@ a.btn{text-decoration:none;color:var(--fg)}
 .port:hover{transform:scale(1.35)}
 .port.t{top:-8px;left:calc(50% - 7.5px)} .port.b{bottom:-8px;left:calc(50% - 7.5px)}
 .port.l{left:-8px;top:calc(50% - 7.5px)} .port.r{right:-8px;top:calc(50% - 7.5px)}
-/* na dotykových zařízeních nerolujeme uvnitř buňky – tah patří mapě nebo buňce */
-@media (any-pointer:coarse){
-  .n-body{max-height:none;overflow:visible}
-}
+/* na dotykových zařízeních nerolujeme uvnitř buňky – tah patří mapě nebo buňce,
+   a buňka se místo toho roztáhne na celý obsah (pravidlo je až na konci souboru,
+   aby ho nepřebilo nic z responzivní části) */
 @media (pointer:coarse){
   /* vybranou buňku jde uchopit kdekoli, i za obsah */
   .node.sel .n-head,.node.sel .n-body,.node.sel .n-img{cursor:grab}
@@ -363,7 +363,6 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--bg-3);border:1px sol
   .toast{bottom:calc(80px + env(safe-area-inset-bottom))}
   .library{padding:16px 14px 50px}
   .grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:11px}
-  .n-body{max-height:300px}
 }
 @media (max-width:520px){
   .topbar{padding:6px 8px;padding-top:max(6px,env(safe-area-inset-top))}
@@ -373,6 +372,11 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--bg-3);border:1px sol
 @media print{
   .topbar,.toolbar,.zoombar,.inspector,.port,.n-resize{display:none !important}
   .canvas-wrap{overflow:visible;background:none}
+}
+
+/* ---------- buňka na dotyku: žádné vnitřní rolování, roste podle obsahu ---------- */
+@media (any-pointer:coarse){
+  .n-body{max-height:none;overflow:visible}
 }
 </style>
 </head>
@@ -532,7 +536,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--bg-3);border:1px sol
 'use strict';
 
 /* verze sestavení – pomůže poznat, jestli prohlížeč nemá načtenou starou kopii */
-const APP_VERSION = '19. 9. 2026 · v8';
+const APP_VERSION = '20. 9. 2026 · v9';
 
 const $  = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -577,6 +581,36 @@ function plural(n, one, few, many) {
 function slugify(s) {
   return (s || 'mapa').normalize('NFD').replace(/[̀-ͯ]/g, '')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'mapa';
+}
+
+/* ---------- obrázky ---------- */
+function loadImage(src) {
+  return new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = rej;
+    i.src = src;
+  });
+}
+
+/** načte obrázek ze souboru a velké fotky zmenší, ať mapa nenabobtná */
+async function imageToDataURL(file, maxDim) {
+  const raw = await fileToDataURL(file);
+  try {
+    const img = await loadImage(raw);
+    const M = maxDim || 1600;
+    const scale = Math.min(1, M / Math.max(img.width, img.height));
+    if (scale === 1 && raw.length < 500000) return raw;
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.width * scale));
+    c.height = Math.max(1, Math.round(img.height * scale));
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    let out = '';
+    try { out = c.toDataURL('image/webp', 0.88); } catch (e) { /* starší prohlížeč */ }
+    if (!out || out.indexOf('data:image/webp') !== 0) out = c.toDataURL('image/jpeg', 0.85);
+    return (out && out.length < raw.length) ? out : raw;
+  } catch (e) { return raw; }
 }
 
 /* ---------- theme ---------- */
@@ -2739,7 +2773,7 @@ function initCanvasEvents() {
     ev.preventDefault();
     const f = ev.dataTransfer.files && ev.dataTransfer.files[0];
     if (!f || !/^image\//.test(f.type)) return;
-    const data = await fileToDataURL(f);
+    const data = await imageToDataURL(f);
     const nodeEl = ev.target.closest('.node');
     pushUndo();
     if (nodeEl) { getNode(nodeEl.dataset.id).image = data; }
@@ -2872,8 +2906,9 @@ function onPointerDown(ev) {
     }
 
     /* ============ MYŠ ============
-       Buňka se dá táhnout rovnou, bez předchozího výběru; v poznámce jde značit text. */
-    if (ev.target.closest('.n-body') && !ev.target.closest('.n-head')) {
+       Buňka se dá táhnout rovnou a za kteroukoli část – za nadpis, poznámku i obrázek.
+       Alt + tažení nechá v poznámce označovat text. */
+    if (ev.altKey && ev.target.closest('.n-body')) {
       if (!selected) setSel(id, ev.shiftKey);
       gesture = { type: 'none' };
       return;
@@ -2906,6 +2941,7 @@ function onPointerDown(ev) {
 }
 
 function onPointerMove(ev) {
+  App.lastPointer = { x: ev.clientX, y: ev.clientY };
   if (pointers.has(ev.pointerId)) pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
 
   if (pinch && pointers.size === 2) {
@@ -3382,7 +3418,7 @@ function buildNodeInspector(body, n) {
     inp.onchange = async () => {
       const f = inp.files[0]; if (!f) return;
       pushUndo();
-      n.image = await fileToDataURL(f);
+      n.image = await imageToDataURL(f);
       paintNode(n); measure(); scheduleSave(); updateInspector(true);
     };
     inp.click();
@@ -4296,6 +4332,83 @@ async function pickFolder() {
   }
 }
 
+/* --------------------- vkládání ze schránky (Ctrl+V) ---------------------- */
+/** kam vložit novou buňku – pod ukazatel, jinak doprostřed plátna */
+function pasteSpot() {
+  const r = els.canvas.getBoundingClientRect();
+  const p = App.lastPointer && App.lastPointer.x > r.left && App.lastPointer.x < r.right &&
+    App.lastPointer.y > r.top && App.lastPointer.y < r.bottom
+    ? App.lastPointer
+    : { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  return screenToWorld(p.x, p.y);
+}
+
+async function onPaste(ev) {
+  if ($('#editor').classList.contains('hidden')) return;
+  const t = ev.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  const dt = ev.clipboardData;
+  if (!dt) return;
+
+  /* --- obrázek --- */
+  let file = null;
+  const items = dt.items ? Array.from(dt.items) : [];
+  for (const it of items) {
+    if (it.kind === 'file' && /^image\//.test(it.type)) { file = it.getAsFile(); break; }
+  }
+  if (!file && dt.files && dt.files.length && /^image\//.test(dt.files[0].type)) file = dt.files[0];
+
+  if (file) {
+    ev.preventDefault();
+    toast('Vkládám obrázek…');
+    let url;
+    try { url = await imageToDataURL(file); }
+    catch (e) { toast('Obrázek se nepodařilo načíst', 4000); return; }
+    const sel = Array.from(App.sel);
+    pushUndo();
+    if (sel.length === 1 && getNode(sel[0])) {
+      const n = getNode(sel[0]);
+      n.image = url;
+      paintNode(n); measure();
+      toast('Obrázek vložen do vybrané buňky');
+    } else {
+      const p = pasteSpot();
+      const n = newNode(Math.round(p.x - 120), Math.round(p.y - 60), '');
+      n.image = url;
+      App.doc.nodes.push(n);
+      renderNodes(); setSel(n.id);
+      toast('Obrázek vložen do nové buňky');
+    }
+    scheduleSave(); updateInspector(true);
+    return;
+  }
+
+  /* --- text --- */
+  const text = (dt.getData('text/plain') || '').replace(/\r\n?/g, '\n').trim();
+  if (!text) return;
+  ev.preventDefault();
+  const sel = Array.from(App.sel);
+  pushUndo();
+  if (sel.length === 1 && getNode(sel[0])) {
+    const n = getNode(sel[0]);
+    n.content = n.content ? n.content + '\n' + text : text;
+    n.open = true;
+    paintNode(n); measure();
+    toast('Text přidán do obsahu buňky');
+  } else {
+    const p = pasteSpot();
+    const lines = text.split('\n');
+    const n = newNode(Math.round(p.x - 120), Math.round(p.y - 30),
+      lines[0].slice(0, 120) || 'Vložený text');
+    const rest = lines.slice(1).join('\n').trim();
+    if (rest) { n.content = rest; n.open = true; }
+    App.doc.nodes.push(n);
+    renderNodes(); setSel(n.id);
+    toast('Vložený text jako nová buňka');
+  }
+  scheduleSave(); updateInspector(true);
+}
+
 /* ----------------------------- nápověda ---------------------------------- */
 function showHelp() {
   const scrim = document.createElement('div');
@@ -4322,7 +4435,9 @@ function showHelp() {
         '<kbd>Shift + klik na vazbu</kbd><span>přidat vazbu do výběru</span>' +
         '<kbd>pravý klik na buňku</kbd><span>„Vybrat vazby této buňky“ – pak je uprav najednou</span>' +
         '<kbd>tažení plátna / mezerník</kbd><span>posun mapy</span>' +
-        '<kbd>myší</kbd><span>buňku chytíš rovnou za hlavičku, v poznámce jde značit text</span>' +
+        '<kbd>myší</kbd><span>buňku chytíš rovnou a za kteroukoli část</span>' +
+        '<kbd>Alt + tažení myší</kbd><span>označí text v poznámce místo posunu buňky</span>' +
+        '<kbd>Ctrl + V</kbd><span>vloží obrázek nebo text ze schránky – do vybrané buňky, jinak do nové</span>' +
         '<kbd>prstem: ťuknutí</kbd><span>vybere buňku – teprve pak ji jde táhnout, a to za kteroukoli část</span>' +
         '<kbd>prstem: tažení</kbd><span>přes nevybranou buňku posouvá mapu</span>' +
         '<kbd>kolečko myši, dva prsty</kbd><span>přiblížení</span>' +
@@ -4488,6 +4603,7 @@ async function init() {
     if (ev.target.classList && ev.target.classList.contains('n-title') && editingEl === ev.target) stopEditTitle(true);
   }, true);
 
+  window.addEventListener('paste', onPaste);
   window.addEventListener('resize', debounce(() => { measure(); }, 150));
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { if (App.dirty) doSave.flush(); }
