@@ -205,9 +205,9 @@ a.btn{text-decoration:none;color:var(--fg)}
 .n-toggle:hover{background:var(--bg-3);color:var(--fg)}
 .n-toggle svg{width:14px;height:14px;transition:transform .15s}
 .node.open .n-toggle svg{transform:rotate(90deg)}
-.n-img{display:block;width:100%;object-fit:cover;max-height:220px;background:var(--bg-3);
+.n-img{display:block;width:100%;height:auto;object-fit:contain;background:var(--bg-3);
   border-radius:9px 9px 0 0}
-.node.shape-round .n-img{border-radius:999px;max-height:150px}
+.node.shape-round .n-img{border-radius:999px}
 .n-body{border-radius:0 0 9px 9px}
 .n-body{
   border-top:1px dashed var(--line);padding:9px 11px 11px;font-size:13.5px;
@@ -536,7 +536,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--bg-3);border:1px sol
 'use strict';
 
 /* verze sestavení – pomůže poznat, jestli prohlížeč nemá načtenou starou kopii */
-const APP_VERSION = '20. 9. 2026 · v9';
+const APP_VERSION = '20. 9. 2026 · v10';
 
 const $  = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -611,6 +611,22 @@ async function imageToDataURL(file, maxDim) {
     if (!out || out.indexOf('data:image/webp') !== 0) out = c.toDataURL('image/jpeg', 0.85);
     return (out && out.length < raw.length) ? out : raw;
   } catch (e) { return raw; }
+}
+
+/** rozměry obrázku z data URL (pro rozumnou šířku nové buňky) */
+async function imageDims(src) {
+  try { const i = await loadImage(src); return { w: i.naturalWidth || i.width, h: i.naturalHeight || i.height }; }
+  catch (e) { return null; }
+}
+
+/** šířka buňky, aby se obrázek hezky vešel: široký snímek dostane širší buňku */
+function widthForImage(dim) {
+  if (!dim || !dim.w || !dim.h) return 260;
+  const ratio = dim.w / dim.h;
+  if (ratio >= 1.6) return 420;      // panorama / snímek obrazovky na šířku
+  if (ratio >= 1) return 340;
+  if (ratio >= 0.7) return 280;
+  return 230;                        // na výšku – užší, ať buňka není obří
 }
 
 /* ---------- theme ---------- */
@@ -989,7 +1005,9 @@ function thumbSVG(doc, W, H) {
     }
     let cy = y + 2;
     if (n.image && imgs < 12 && pw > 16) {
-      const ih = Math.min(ph * 0.55, pw * 0.62);
+      /* když je buňka hlavně obrázek, ať ho tak ukáže i náhled */
+      const textRoom = (n.title ? 14 : 0) + (n.open && n.content ? 22 : 0);
+      const ih = Math.max(6, Math.min(ph - 4, ph - textRoom * s));
       g += '<image href="' + esc(n.image) + '" x="' + (x + 1) + '" y="' + (cy) + '" width="' + (pw - 2) +
         '" height="' + ih.toFixed(1) + '" preserveAspectRatio="xMidYMid slice"/>';
       cy += ih + 2;
@@ -2337,8 +2355,17 @@ function paintNode(n) {
   else el.style.borderColor = '';
 
   const img = el.querySelector('.n-img');
-  if (n.image) { img.src = n.image; img.classList.remove('hidden'); }
-  else { img.removeAttribute('src'); img.classList.add('hidden'); }
+  if (n.image) {
+    if (img.getAttribute('src') !== n.image) {
+      /* až se obrázek načte, buňka povyroste – přepočítáme rozměry a vazby */
+      img.addEventListener('load', () => { measure(); scheduleSave(); }, { once: true });
+      img.setAttribute('src', n.image);
+    }
+    img.classList.remove('hidden');
+  } else {
+    img.removeAttribute('src');
+    img.classList.add('hidden');
+  }
 
   const t = el.querySelector('.n-title');
   if (t.getAttribute('contenteditable') !== 'true') t.textContent = n.title || '';
@@ -2779,8 +2806,10 @@ function initCanvasEvents() {
     if (nodeEl) { getNode(nodeEl.dataset.id).image = data; }
     else {
       const p = screenToWorld(ev.clientX, ev.clientY);
-      const n = newNode(p.x - NODE_W / 2, p.y - 20, f.name.replace(/\.[^.]+$/, ''));
-      n.image = data; App.doc.nodes.push(n);
+      const w = widthForImage(await imageDims(data));
+      const n = newNode(p.x - w / 2, p.y - 20, f.name.replace(/\.[^.]+$/, ''));
+      n.image = data; n.w = w;
+      App.doc.nodes.push(n);
     }
     renderNodes(); scheduleSave();
   });
@@ -4373,8 +4402,9 @@ async function onPaste(ev) {
       toast('Obrázek vložen do vybrané buňky');
     } else {
       const p = pasteSpot();
-      const n = newNode(Math.round(p.x - 120), Math.round(p.y - 60), '');
-      n.image = url;
+      const w = widthForImage(await imageDims(url));
+      const n = newNode(Math.round(p.x - w / 2), Math.round(p.y - 60), '');
+      n.image = url; n.w = w;
       App.doc.nodes.push(n);
       renderNodes(); setSel(n.id);
       toast('Obrázek vložen do nové buňky');
