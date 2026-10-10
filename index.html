@@ -5680,6 +5680,15 @@ async function openMap(entry) {
     if (App.entry !== entry) return;
     measure();
     if (!App.doc.nodes.length) { fitView(false); }
+    else if (entry.fresh) {
+      /* nová mapa: první buňka patří doprostřed, ne napůl za levý horní roh */
+      entry.fresh = false;
+      const n = App.doc.nodes[0], s = nodeSize(n), v = view();
+      v.zoom = 1;
+      v.x = Math.round(els.canvas.clientWidth / 2 - (n.x + s.w / 2));
+      v.y = Math.round(els.canvas.clientHeight / 3 - (n.y + s.h / 2));
+      applyView();
+    }
     else if (!anythingVisible()) {
       fitView(false);
       if (!myView) toast('Uložený výřez byl mimo obrazovku – mapa je vycentrovaná', 3200);
@@ -5749,6 +5758,7 @@ async function createMap() {
     n1.color = 'blue';
     doc.nodes.push(n1);
     const entry = await Store.createFrom(doc);
+    entry.fresh = true;                         // první buňku po otevření vystředíme
     await openMap(entry);
     setTimeout(() => { setSel(n1.id); editTitle(n1); }, 60);
   } catch (err) {
