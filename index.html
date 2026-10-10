@@ -307,6 +307,10 @@ code{font-family:var(--mono);font-size:.84em;background:var(--bg-3);padding:.08e
   .node.sel:hover{box-shadow:0 0 0 2px var(--accent),0 0 0 5px var(--accent-soft)}
 }
 /* markdown v buňce */
+/* Dlouhé adresy, slova bez mezer a kód se musí zalomit uvnitř buňky. Na dotyku se obsah
+   buňky nedá rolovat (tah patří mapě), takže co se nevejde, by jinak vylezlo ven. */
+.md,.n-title{overflow-wrap:anywhere}
+.md a,.md code{word-break:break-word}
 .md>*:first-child{margin-top:0}
 .md>*:last-child{margin-bottom:0}
 .md h1,.md h2,.md h3{color:var(--fg);letter-spacing:-.005em;line-height:1.25;margin:.8em 0 .35em}
@@ -316,19 +320,25 @@ code{font-family:var(--mono);font-size:.84em;background:var(--bg-3);padding:.08e
 .md li{margin:.2em 0}
 .md code{font-family:var(--mono);font-size:.82em;background:var(--bg-3);
   padding:.1em .35em;border-radius:var(--r-s)}
-.md pre{background:var(--bg-3);border:1px solid var(--line);padding:9px 11px;border-radius:var(--r-s);overflow:auto;margin:.5em 0}
+.md pre{background:var(--bg-3);border:1px solid var(--line);padding:9px 11px;border-radius:var(--r-s);overflow:auto;margin:.5em 0;
+  white-space:pre-wrap}
 .md pre code{background:none;padding:0}
 .md blockquote{margin:.5em 0;padding:.1em 0 .1em 10px;border-left:2.5px solid var(--accent);color:var(--fg-2);font-style:italic}
 .md a{color:var(--accent)}
 .md hr{border:0;border-top:1px solid var(--line);margin:.7em 0}
-.md table{border-collapse:collapse;margin:.5em 0;font-size:.95em}
+/* pevné rozvržení: sloupce se dělí o šířku buňky rovným dílem, takže tabulka nikdy nepřeteče
+   a slova se lámou jen tehdy, když se do sloupce opravdu nevejdou */
+.md table{border-collapse:collapse;margin:.5em 0;font-size:.95em;table-layout:fixed;width:100%}
 .md th{text-align:left;font-family:var(--mono);font-size:.72em;letter-spacing:.1em;text-transform:uppercase;
   color:var(--accent);font-weight:400;border-bottom:1.5px solid var(--ink);padding:0 10px 4px 0}
 .md td{border-bottom:1px solid var(--line);padding:5px 10px 5px 0;vertical-align:top;text-align:left}
 .md img{max-width:100%;border-radius:var(--r-s)}
-.md li.task{list-style:none;margin-left:-1.15em;display:flex;align-items:flex-start;gap:7px}
+/* úkol: zaškrtávátko vlevo, text vedle něj běží jako obyčejný odstavec (odkaz v úkolu
+   se tak zalomí spolu s textem a nestojí vedle něj jako zvláštní sloupec) */
+.md li.task{list-style:none;margin-left:-1.15em;padding-left:22px;position:relative}
 .md li.task.done{color:var(--fg-3);text-decoration:line-through;text-decoration-color:var(--line-2)}
 .md input[type=checkbox]{margin:.2em 0 0;flex:none}
+.md li.task>input{position:absolute;left:0;top:.22em;margin:0}
 .md input.md-cb{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
 .md input.md-cb:not([disabled]):hover{transform:scale(1.15)}
 
@@ -695,7 +705,7 @@ kbd{font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;background:var
 'use strict';
 
 /* verze sestavení – pomůže poznat, jestli prohlížeč nemá načtenou starou kopii */
-const APP_VERSION = '10. 10. 2026 · v11';
+const APP_VERSION = '11. 10. 2026 · v11.1';
 
 const $  = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
