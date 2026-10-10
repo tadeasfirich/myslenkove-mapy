@@ -1,9 +1,23 @@
 # Myšlenkové mapy
 
-Volné myšlenkové mapy v prohlížeči – buňka má název a volitelný obsah (malý dokument
-v Markdownu), vazby mohou vést odkudkoli kamkoli. Celá aplikace je jeden soubor
+Volné myšlenkové mapy v prohlížeči – buňka má název, volitelný obsah (malý dokument
+v Markdownu) a obrázek, vazby mohou vést odkudkoli kamkoli. Celá aplikace je jeden soubor
 `index.html`, žádný server, žádná databáze. Mapy se ukládají jako čitelné soubory
 `*.mapa.json` – buď do složky v počítači, nebo do složky na Google Disku.
+
+Na telefonu s Androidem si ji můžeš přidat na plochu jako aplikaci, vkládat do buněk
+fotky a snímky obrazovky a posílat do ní obrázky přes **Sdílet** (viz kapitola 4).
+
+**Soubory v repozitáři**
+
+| Soubor | K čemu je |
+| --- | --- |
+| `index.html` | celá aplikace (včetně písem) |
+| `config.js` | ID klienta pro Google Disk – když ho máš vyplněné, **nepřepisuj ho** |
+| `manifest.webmanifest`, `sw.js` | instalace na plochu, start bez sítě, příjem obrázků přes Sdílet |
+| `icon-192.png`, `icon-512.png`, `icon-maskable-512.png` | ikona aplikace |
+
+Bez `manifest.webmanifest`, `sw.js` a ikon aplikace funguje taky, jen nepůjde nainstalovat.
 
 ---
 
@@ -16,8 +30,13 @@ v Markdownu), vazby mohou vést odkudkoli kamkoli. Celá aplikace je jeden soubo
    - **Add a README file** nech **vypnuté** – README máme vlastní
    - **Create repository**
 3. Na stránce repozitáře klikni **Add file** → **Upload files**.
-4. Přetáhni do okna tyhle tři soubory: `index.html`, `config.js`, `README.md`.
+4. Přetáhni do okna všechny soubory z tabulky nahoře a `README.md`.
 5. Dole **Commit changes**.
+
+**Aktualizace na novou verzi** je stejná: **Add file** → **Upload files**, přetáhni nové
+soubory (GitHub ty staré přepíše) a **Commit changes**. Za pár minut je nová verze venku.
+Že ji máš načtenou, poznáš v **Nastavení** dole (`Verze …`). V nainstalované aplikaci
+se nová verze projeví při druhém otevření.
 
 ## 2. Zapnutí GitHub Pages
 
@@ -132,7 +151,51 @@ je totiž vždy svázané s adresou, ze které se stránka otevírá.
 
 ---
 
-## 4. Když to nejede
+## 4. Telefon s Androidem
+
+### Přidání na plochu
+
+Otevři svoji adresu v **Chromu** → nabídka **⋮** → **Přidat na plochu** / **Instalovat aplikaci**.
+Aplikace se pak otevírá přes celou obrazovku, spustí se i bez sítě (mapy z Disku ale
+potřebují připojení) a objeví se v systémové nabídce **Sdílet**.
+
+Tlačítko **Zpět** zavře otevřenou nabídku, z mapy vrátí do knihovny.
+
+### Obrázek do buňky
+
+1. Klepni na buňku (vybere se).
+2. Dole klepni na **Obrázek**.
+3. Vyber zdroj:
+   - **Galerie** – systémový výběr Androidu; nejnovější fotky a snímky obrazovky jsou nahoře.
+   - **Vyfotit** – otevře fotoaparát a snímek rovnou vloží.
+   - **Ze schránky** – vloží zkopírovaný obrázek.
+
+Když není vybraná žádná buňka, obrázek se vloží jako nová buňka doprostřed obrazovky
+(z galerie jich pak jde vybrat víc naráz). Stejná nabídka je i v **⋯** a v panelu **Detail**.
+
+### Poslední fotky rovnou v nabídce
+
+Webová stránka nesmí sama nahlížet do galerie telefonu – proto ten systémový výběr.
+Jde to ale obejít jednorázovým povolením: v nabídce klepni na **Připojit složku s fotkami**
+a vyber složku, kam telefon ukládá snímky – typicky `DCIM/Camera` (fotky) nebo
+`Pictures/Screenshots` (snímky obrazovky; u některých telefonů `DCIM/Screenshots`).
+Složek může být víc. Od té chvíle nabídka ukazuje nejnovější snímky jako náhledy
+a vložíš je jedním klepnutím.
+
+- Prohlížeč může chtít přístup po každém spuštění potvrdit (tlačítko **Zobrazit poslední fotky**).
+- U hodně velkých složek (tisíce fotek) to může chvíli trvat; menší složka je rychlejší.
+- Funguje v Chromu 132 a novějším. Jinde se tahle část nabídky prostě neukáže.
+
+### Sdílet → Myšlenkové mapy
+
+S aplikací přidanou na plochu: udělej snímek obrazovky nebo otevři fotku → **Sdílet** →
+**Myšlenkové mapy**. Aplikace se otevře, a jakmile otevřeš mapu, nabídne přijatý obrázek
+ke vložení. Dokud ho nevložíš nebo nezahodíš, čeká v nabídce **Obrázek** pod nadpisem
+*Přijaté přes Sdílet*.
+
+---
+
+## 5. Když to nejede
 
 ### „Přístup zablokován: aplikace … neprošla procesem ověření Googlem“ (chyba 403: access_denied)
 
@@ -166,8 +229,26 @@ modrým pruhem **Nahrát je na Disk**.
 
 Aplikace se ptá Disku každých ~20 vteřin, ale jen když je okno vidět – po přepnutí zpátky
 na záložku se zeptá hned. Ručně to vyvoláš tlačítkem **⟳** vedle názvu mapy nebo
-**Obnovit** v knihovně. Na mobilu se změna ukládá půl vteřiny po posledním kliknutí,
-takže než telefon zamkneš, je na Disku.
+**Obnovit** v knihovně. Změna se na Disk ukládá asi 2,5 vteřiny po poslední úpravě
+a hned ve chvíli, kdy aplikaci přepneš do pozadí nebo telefon zamkneš.
+
+### „Neuloženo!“ nebo chyba 503 z Google Disku
+
+Disk občas odpoví *Transient failure* (503) nebo *rate limit* – znamená to „teď ne, zkus to
+za chvíli“. Aplikace to dělá sama: každé volání zkusí až pětkrát s prodlužující se pauzou
+a teprve potom ukáže tmavý pruh nahoře. Úpravy mezitím leží v zařízení (i kdybys záložku
+zavřel) a nabídnou se při dalším otevření mapy. Pruh má dvě tlačítka: **Zkusit hned**
+a **Stáhnout kopii**.
+
+Stav uložení ukazuje značka vedle názvu mapy – a pozná se i bez barev:
+plné kolečko = uloženo, prázdné blikající = ukládám, čtvereček v tmavém poli = neuloženo.
+Na telefonu je vidět jen značka; klepnutím na ni se ukáže text.
+
+### „Mapa se mezitím změnila na jiném zařízení“
+
+Otevřel jsi mapu na dvou zařízeních a na obou jsi ji upravil. Aplikace nic nepřepíše,
+dokud nevybereš: **Načíst jejich verzi** (tvoje neuložené úpravy zmizí), nebo
+**Nechat moji** (tvoje verze přepíše tu druhou).
 
 ### „Nebyl nalezen klient OAuth“ / invalid_client
 
@@ -186,7 +267,29 @@ repozitáře. Změna se občas projeví až za pár minut.
 
 ---
 
-## 5. Bezpečnost
+## 6. Jak aplikace šetří Google Disk
+
+- **Posun a přiblížení plátna se neukládají.** Výřez si pamatuje každé zařízení samo –
+  telefon a počítač stejně potřebují každý jiný. Do souboru se propíše až s opravdovou úpravou.
+- **Ukládá se po chvilce klidu** (2,5 s po poslední úpravě, při souvislé práci nejpozději
+  po 20 s) a **nikdy dvě nahrávání přes sebe** – další změna si počká, až to první doběhne.
+- **Když se obsah nezměnil, nic se neposílá.**
+- **Po spuštění se stáhnou jen mapy, které se změnily.** Ostatní se vezmou z mezipaměti
+  zařízení (u šifrovaných map tam leží jen šifrovaný text).
+- **Obrázky se při vložení zmenší** zhruba pod 400 kB na kus. Jsou totiž uložené přímo
+  v souboru mapy a s každým uložením cestují na Disk. Snímek obrazovky z telefonu zůstane
+  v plném rozlišení, fotka z foťáku se zmenší asi na 2,6 Mpx.
+- Mapy nad 4,5 MB se nahrávají postupem pro velké soubory (*resumable upload*) – obyčejné
+  nahrání Google garantuje jen do 5 MB.
+
+Přihlašovací token si prohlížeč z bezpečnostních důvodů nepamatuje, takže po každém spuštění
+je potřeba jedno klepnutí na **Připojit Google Disk**. Zhruba po hodině práce token vyprší –
+aplikace si ho při nejbližším klepnutí obnoví sama; když to prohlížeč nedovolí, ukáže pruh
+**Přihlásit znovu** a úpravy mezitím počkají v zařízení.
+
+---
+
+## 7. Bezpečnost
 
 - Aplikace si říká o jediné oprávnění **`drive.file`**. To znamená, že vidí **výhradně
   soubory, které sama vytvořila** – ke zbytku tvého Disku se nedostane ani omylem.
@@ -204,7 +307,7 @@ repozitáře. Změna se občas projeví až za pár minut.
 
 ---
 
-## 6. Import map z OrgPadu
+## 8. Import map z OrgPadu
 
 V knihovně klikni na **Importovat mapu** (nebo soubor prostě přetáhni do okna).
 Aplikace umí obě věci, které OrgPad nabízí:
@@ -230,12 +333,29 @@ jako každá jiná.
 
 ---
 
-## 7. Formát souboru
+## 9. Formát souboru
 
 `*.mapa.json` je obyčejný čitelný JSON. Vedle textu drží i kompletní rozmístění:
 souřadnice, šířku a výšku každé buňky, stav rozbalení obsahu, pořadí vykreslení
-a přesný posun i přiblížení plátna. Po znovuotevření tedy mapa vypadá naprosto stejně.
+a posun i přiblížení plátna (ten slouží jako výchozí pohled na novém zařízení; dál si
+každé zařízení pamatuje svůj). Obrázky jsou uložené přímo v souboru jako `data:` adresy.
 Jsou v něm i výchozí vzhledy nových buněk a vazeb pro danou mapu.
 
 Zašifrovaný soubor má stejnou příponu, uvnitř je obálka
 `{ "enc":"AES-GCM", "salt":…, "iv":…, "data":… }`.
+
+---
+
+## 10. Vzhled
+
+Rozhraní se drží stejných pravidel jako tiskové materiály: jedna akcentní barva
+(kobaltová `#2A4B9B`), písmo Carlito, popisky prostrkanými verzálkami v DejaVu Sans Mono,
+ostré rohy, tenké linky a silná linka jako oddělovač. Význam nikdy nenese jen barva –
+stav uložení se liší tvarem značky, výběr dvojitým rámečkem, mazání tučným textem.
+Obě písma jsou zabalená přímo v `index.html` jako zmenšené podmnožiny (jen znaky pro
+češtinu), takže aplikace vypadá stejně na počítači i na telefonu a funguje offline.
+Podle licenčních podmínek jsou uvnitř přejmenovaná: *Mapy Sans* je podmnožina písma Carlito
+(© 2013 The Carlito Project Authors, SIL Open Font License 1.1), *Mapy Mono* podmnožina
+DejaVu Sans Mono (© Bitstream, Inc., licence Bitstream Vera; změny DejaVu jsou volné dílo).
+
+Barvy buněk a vazeb jsou obsah mapy, ne rozhraní – ty si volíš sám.
