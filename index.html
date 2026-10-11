@@ -237,8 +237,9 @@ code{font-family:var(--mono);font-size:.84em;background:var(--bg-3);padding:.08e
 }
 .node.shape-round{border-radius:999px}
 .node.shape-round .n-head{padding:12px 20px}
-/* rozbalená oválná buňka: mírnější oblouk, ať se do ní obsah vejde */
-.node.shape-round.open{border-radius:24px}
+/* oválná buňka s obsahem nebo obrázkem: mírnější oblouk, ať se do ní všechno vejde.
+   Plná „pilulka“ z vysoké buňky dělala elipsu, která ořízla obrázek a název nechala venku. */
+.node.shape-round.open,.node.shape-round.has-img{border-radius:24px}
 .node.shape-round.open .n-body{padding-left:20px;padding-right:20px;padding-bottom:16px}
 .node.shape-note{border-style:dashed;border-color:var(--fg-3)}
 .node.shape-plain{background:transparent;border-color:transparent}
@@ -268,7 +269,7 @@ code{font-family:var(--mono);font-size:.84em;background:var(--bg-3);padding:.08e
 .n-toggle svg{width:14px;height:14px;transition:transform .15s}
 .node.open .n-toggle svg{transform:rotate(90deg)}
 .n-img{display:block;width:100%;height:auto;object-fit:contain;background:var(--bg-3)}
-.node.shape-round .n-img{border-radius:999px}
+.node.shape-round .n-img{border-radius:22.8px 22.8px 0 0}
 .n-body{
   border-top:1px solid var(--line);padding:9px 11px 11px;font-size:14.5px;
   color:var(--fg-2);overflow:auto;max-height:420px;cursor:grab;
@@ -705,7 +706,7 @@ kbd{font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;background:var
 'use strict';
 
 /* verze sestavení – pomůže poznat, jestli prohlížeč nemá načtenou starou kopii */
-const APP_VERSION = '11. 10. 2026 · v11.1';
+const APP_VERSION = '11. 10. 2026 · v11.2';
 
 const $  = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -1285,7 +1286,7 @@ function thumbSVG(doc, W, H) {
     const h = thumbEstH(n), w = n.w;
     const x = X(n.x), y = Y(n.y), pw = +(w * s).toFixed(1), ph = +(h * s).toFixed(1);
     const col = colorHex(n.color);
-    const rx = n.shape === 'round' ? ph / 2 : Math.min(1, ph / 3);
+    const rx = n.shape === 'round' ? ((n.image || (n.open && n.content)) ? Math.min(24 * s, ph / 2) : ph / 2) : Math.min(1, ph / 3);
     const plain = n.shape === 'plain';
     if (!plain) {
       g += '<rect x="' + x + '" y="' + y + '" width="' + pw + '" height="' + ph + '" rx="' + rx +
@@ -2977,7 +2978,7 @@ function paintNode(n) {
   el.style.left = n.x + 'px';
   el.style.top = n.y + 'px';
   el.style.width = n.w + 'px';
-  el.className = 'node shape-' + n.shape + (n.open ? ' open' : '') +
+  el.className = 'node shape-' + n.shape + (n.open ? ' open' : '') + (n.image ? ' has-img' : '') +
     (App.sel.has(n.id) ? ' sel' : '') +
     (App.linkGroup && App.linkGroup.indexOf(n.id) >= 0 ? ' linksrc' : '');
   const hex = colorHex(n.color);
@@ -3070,8 +3071,8 @@ function edgeGeometry(e) {
   const b = App.doc.nodes.find((n) => n.id === e.to);
   if (!a || !b) return null;
   const ra = nodeRect(a), rb = nodeRect(b);
-  const p1 = anchor(ra, rb.cx, rb.cy, a.shape === 'round' && !a.open);
-  const p2 = anchor(rb, ra.cx, ra.cy, b.shape === 'round' && !b.open);
+  const p1 = anchor(ra, rb.cx, rb.cy, a.shape === 'round' && !a.open && !a.image);
+  const p2 = anchor(rb, ra.cx, ra.cy, b.shape === 'round' && !b.open && !b.image);
   return { p1, p2 };
 }
 
@@ -3796,7 +3797,7 @@ function onPointerMove(ev) {
     g.moved = true;
     const from = getNode(g.from);
     const p = screenToWorld(ev.clientX, ev.clientY);
-    const a = anchor(nodeRect(from), p.x, p.y, from.shape === 'round');
+    const a = anchor(nodeRect(from), p.x, p.y, from.shape === 'round' && !from.open && !from.image);
     App.tempWire.setAttribute('d', 'M' + a.x + ',' + a.y + ' L' + p.x + ',' + p.y);
     const over = document.elementFromPoint(ev.clientX, ev.clientY);
     const t = over && over.closest('.node');
