@@ -350,7 +350,8 @@ Zašifrovaný soubor má stejnou příponu, uvnitř je obálka
 
 Rozhraní se drží stejných pravidel jako tiskové materiály: jedna akcentní barva
 (kobaltová `#2A4B9B`), písmo Carlito, popisky prostrkanými verzálkami v DejaVu Sans Mono,
-ostré rohy, tenké linky a silná linka jako oddělovač. Význam nikdy nenese jen barva –
+ostré rohy, tenké linky a silná linka jako oddělovač. Jediná výjimka jsou buňky, dolní lišta
+a zoom – ty mají zaoblené rohy po vzoru OrgPadu. Význam nikdy nenese jen barva –
 stav uložení se liší tvarem značky, výběr dvojitým rámečkem, mazání tučným textem.
 Obě písma jsou zabalená přímo v `index.html` jako zmenšené podmnožiny (jen znaky pro
 češtinu), takže aplikace vypadá stejně na počítači i na telefonu a funguje offline.

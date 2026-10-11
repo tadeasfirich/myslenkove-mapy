@@ -27,6 +27,7 @@
    · text #14171f, tlumený #5a6172, linky #b9c0ce, podklad boxu #eef1f7
    · písmo Carlito, popisky a čísla DejaVu Sans Mono (prostrkané verzálky)
    · ostré rohy (2 px), tenké linky, silná linka 2,5 px jako oddělovač
+     – výjimka na přání: buňky, dolní lišta a zoom mají zaoblené rohy jako v OrgPadu
    · význam nikdy nenese jen barva – vždy i tvar nebo text
    Barvy buněk a vazeb jsou obsah mapy, ne rozhraní – ty si volí uživatel.
    ============================================================ */
@@ -42,6 +43,7 @@
   --shadow-2:0 2px 8px rgba(20,23,31,.08);
   --shadow-3:0 14px 34px rgba(20,23,31,.16),0 2px 6px rgba(20,23,31,.08);
   --r-s:2px; --r-m:2px; --r-l:3px;
+  --r-node:18px;            /* buňky, dolní lišta a zoom – zaoblení jako v OrgPadu (viz NODE_R ve skriptu) */
   --tap:40px;
   --font:"Carlito","Mapy Sans","Calibri","DejaVu Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --mono:"DejaVu Sans Mono","Mapy Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -229,29 +231,32 @@ code{font-family:var(--mono);font-size:.84em;background:var(--bg-3);padding:.08e
   pointer-events:none;font-family:var(--mono)}
 
 /* ---------- buňka ---------- */
+/* --nr = poloměr rohu, --bt = tloušťka horního okraje (barevná buňka ho má silnější) */
 .node{
+  --nr:var(--r-node); --bt:1.2px;
   position:absolute;touch-action:none;background:var(--bg-2);border:1.2px solid var(--line-2);
-  border-radius:var(--r-m);
+  border-radius:var(--nr);
   display:flex;flex-direction:column;
   transition:box-shadow .12s,border-color .12s;
 }
-.node.shape-round{border-radius:999px}
+/* barva buňky: silnější horní okraj, který se v rozích plynule ztenčí */
+.node.has-color{--bt:5px;border-top-width:5px}
+.node.shape-round{--nr:999px;--bt:1.2px;border-top-width:1.2px}
 .node.shape-round .n-head{padding:12px 20px}
 /* oválná buňka s obsahem nebo obrázkem: mírnější oblouk, ať se do ní všechno vejde.
    Plná „pilulka“ z vysoké buňky dělala elipsu, která ořízla obrázek a název nechala venku. */
-.node.shape-round.open,.node.shape-round.has-img{border-radius:24px}
+.node.shape-round.open,.node.shape-round.has-img{--nr:30px}
 .node.shape-round.open .n-body{padding-left:20px;padding-right:20px;padding-bottom:16px}
-.node.shape-note{border-style:dashed;border-color:var(--fg-3)}
-.node.shape-plain{background:transparent;border-color:transparent}
+.node.shape-note{--bt:1.2px;border-top-width:1.2px;border-style:dashed;border-color:var(--fg-3)}
+.node.shape-plain{--nr:var(--r-s);--bt:1.2px;border-top-width:1.2px;background:transparent;border-color:transparent}
 .node.shape-plain .n-head{padding-left:2px;padding-right:2px}
 .node:hover{box-shadow:var(--shadow-2)}
 /* výběr se pozná podle silnějšího dvojitého rámečku, ne jen podle barvy */
 .node.sel{box-shadow:0 0 0 2px var(--accent),0 0 0 5px var(--accent-soft)}
 .node.drop{box-shadow:0 0 0 2px var(--accent),0 0 0 6px var(--accent-soft)}
 .node.linksrc{outline:2px dashed var(--accent);outline-offset:4px}
-.node .accent{height:4px;flex:none;background:var(--n-color,transparent)}
-.node.shape-round .accent{display:none !important}
-.n-head{display:flex;align-items:flex-start;gap:6px;padding:9px 11px;cursor:grab}
+.node .accent{display:none !important}
+.n-head{display:flex;align-items:flex-start;gap:6px;padding:10px 14px;cursor:grab}
 .node.dragging .n-head{cursor:grabbing}
 .n-title{
   flex:1;min-width:0;font-weight:700;font-size:15.5px;line-height:1.3;
@@ -268,16 +273,18 @@ code{font-family:var(--mono);font-size:.84em;background:var(--bg-3);padding:.08e
 .n-toggle:hover{background:var(--bg-3);color:var(--fg)}
 .n-toggle svg{width:14px;height:14px;transition:transform .15s}
 .node.open .n-toggle svg{transform:rotate(90deg)}
-.n-img{display:block;width:100%;height:auto;object-fit:contain;background:var(--bg-3)}
-.node.shape-round .n-img{border-radius:22.8px 22.8px 0 0}
+/* obrázek je v buňce nahoře – jeho horní rohy kopírují vnitřní oblouk okraje */
+.n-img{display:block;width:100%;height:auto;object-fit:contain;background:var(--bg-3);
+  border-radius:calc(var(--nr) - 1.2px) calc(var(--nr) - 1.2px) 0 0 / calc(var(--nr) - var(--bt)) calc(var(--nr) - var(--bt)) 0 0}
 .n-body{
-  border-top:1px solid var(--line);padding:9px 11px 11px;font-size:14.5px;
+  border-top:1px solid var(--line);padding:10px 14px 13px;font-size:14.5px;
   color:var(--fg-2);overflow:auto;max-height:420px;cursor:grab;
 }
 .node.dragging .n-body,.node.dragging .n-head{cursor:grabbing}
 .n-body.empty-hint{color:var(--fg-3);cursor:pointer}
 .n-badge{position:absolute;right:6px;bottom:4px;font-size:10px;color:var(--fg-3)}
 .n-resize{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;
+  border-bottom-right-radius:inherit;
   opacity:0;background:
     linear-gradient(135deg,transparent 50%,var(--accent) 50%)}
 .node.sel .n-resize{opacity:1}
@@ -347,15 +354,18 @@ code{font-family:var(--mono);font-size:.84em;background:var(--bg-3);padding:.08e
 .toolbar{
   position:absolute;left:50%;transform:translateX(-50%);bottom:16px;z-index:20;
   display:flex;gap:5px;align-items:center;padding:5px;
-  background:var(--bg-2);border:1.5px solid var(--ink);border-radius:var(--r-l);
+  background:var(--bg-2);border:1.5px solid var(--ink);border-radius:var(--r-node);
   box-shadow:var(--shadow-3);max-width:calc(100% - 20px);overflow-x:auto;
 }
+/* tlačítka v zaoblených lištách mají oblouk o odsazení menší než lišta */
+.toolbar .btn,.zoombar .btn{border-radius:calc(var(--r-node) - 6px)}
+.toolbar .btn[aria-pressed="true"]{box-shadow:none}
 .toolbar .btn{border-color:transparent}
 .toolbar .btn:hover{border-color:transparent}
 .toolbar .btn[aria-pressed="true"]{border-color:var(--accent)}
 .zoombar{position:absolute;right:14px;bottom:16px;z-index:20;display:flex;flex-direction:column;
   gap:2px;padding:4px;background:var(--bg-2);border:1.5px solid var(--ink);
-  border-radius:var(--r-l);box-shadow:var(--shadow-2)}
+  border-radius:var(--r-node);box-shadow:var(--shadow-2)}
 .zoomval{font-family:var(--mono);font-size:10px;text-align:center;color:var(--fg-3);padding:2px 0}
 
 /* ---------- panel detailu ---------- */
@@ -371,7 +381,7 @@ code{font-family:var(--mono);font-size:.84em;background:var(--bg-3);padding:.08e
 .swatches{display:flex;gap:7px;flex-wrap:wrap}
 .sw{width:26px;height:26px;border-radius:50%;border:2px solid var(--bg-2);box-shadow:0 0 0 1px var(--line-2)}
 .sw[aria-pressed="true"]{box-shadow:0 0 0 2px var(--ink)}
-.npreview{position:relative;border:1.2px solid var(--line-2);border-radius:var(--r-m);
+.npreview{position:relative;border:1.2px solid var(--line-2);border-radius:var(--r-node);
   background:var(--bg-2);overflow:hidden;margin:0 0 12px;min-width:90px}
 .npreview i{display:block;height:4px;background:var(--n-color,transparent)}
 .npreview b{display:block;padding:8px 10px;font-size:15px;font-weight:700}
@@ -1101,6 +1111,16 @@ const SHAPES = [
 
 const NODE_W = 210;
 
+/* Zaoblení rohů buňky – musí sedět s --r-node a s oválnou buňkou v CSS.
+   Podle něj se počítá, kde vazba končí na obrysu buňky, a kreslí se miniatury. */
+const NODE_R = 18;          // karta, lísteček
+const NODE_R_ROUND = 30;    // oválná buňka s obsahem nebo obrázkem
+function nodeRadius(n) {
+  if (n.shape === 'plain') return 0;
+  if (n.shape === 'round') return (n.open || n.image) ? NODE_R_ROUND : 9999;   // jinak „pilulka“
+  return NODE_R;
+}
+
 const NODE_DEFAULT = { color: 'none', shape: 'card', w: NODE_W };
 
 /** výchozí vzhled nové buňky – uložený v dokumentu */
@@ -1286,7 +1306,7 @@ function thumbSVG(doc, W, H) {
     const h = thumbEstH(n), w = n.w;
     const x = X(n.x), y = Y(n.y), pw = +(w * s).toFixed(1), ph = +(h * s).toFixed(1);
     const col = colorHex(n.color);
-    const rx = n.shape === 'round' ? ((n.image || (n.open && n.content)) ? Math.min(24 * s, ph / 2) : ph / 2) : Math.min(1, ph / 3);
+    const rx = Math.min(nodeRadius(n) * s, pw / 2, ph / 2);
     const plain = n.shape === 'plain';
     if (!plain) {
       g += '<rect x="' + x + '" y="' + y + '" width="' + pw + '" height="' + ph + '" rx="' + rx +
@@ -2979,6 +2999,7 @@ function paintNode(n) {
   el.style.top = n.y + 'px';
   el.style.width = n.w + 'px';
   el.className = 'node shape-' + n.shape + (n.open ? ' open' : '') + (n.image ? ' has-img' : '') +
+    (colorHex(n.color) ? ' has-color' : '') +
     (App.sel.has(n.id) ? ' sel' : '') +
     (App.linkGroup && App.linkGroup.indexOf(n.id) >= 0 ? ' linksrc' : '');
   const hex = colorHex(n.color);
@@ -3044,19 +3065,29 @@ function nodeRect(n) {
   return { x: n.x, y: n.y, w: s.w, h: s.h, cx: n.x + s.w / 2, cy: n.y + s.h / 2 };
 }
 
-/** průsečík úsečky střed->cíl s obdélníkem (nebo elipsou u oválných buněk) */
-function anchor(r, tx, ty, round) {
+/** Průsečík úsečky střed->cíl s obrysem buňky. Obrys je obdélník se zaoblenými rohy
+ *  (rad = poloměr); když je poloměr větší než půlka kratší strany, vyjde z toho „pilulka“. */
+function anchor(r, tx, ty, rad) {
   const dx = tx - r.cx, dy = ty - r.cy;
   if (!dx && !dy) return { x: r.cx, y: r.cy };
-  if (round) {
-    const a = r.w / 2, b = r.h / 2;
-    const k = 1 / Math.sqrt((dx * dx) / (a * a) + (dy * dy) / (b * b));
-    return { x: r.cx + dx * k, y: r.cy + dy * k };
-  }
   const sx = dx === 0 ? Infinity : (r.w / 2) / Math.abs(dx);
   const sy = dy === 0 ? Infinity : (r.h / 2) / Math.abs(dy);
   const k = Math.min(sx, sy);
-  return { x: r.cx + dx * k, y: r.cy + dy * k };
+  const p = { x: r.cx + dx * k, y: r.cy + dy * k };
+  const R = Math.min(rad || 0, r.w / 2, r.h / 2);
+  if (R <= 0) return p;
+  /* bod na rovné části obrysu je hotový; v rohu se průsečík hledá s obloukem */
+  const inX = p.x < r.x + R || p.x > r.x + r.w - R;
+  const inY = p.y < r.y + R || p.y > r.y + r.h - R;
+  if (!(inX && inY)) return p;
+  const ccx = p.x < r.cx ? r.x + R : r.x + r.w - R;
+  const ccy = p.y < r.cy ? r.y + R : r.y + r.h - R;
+  const ox = r.cx - ccx, oy = r.cy - ccy;
+  const A = dx * dx + dy * dy, B = 2 * (ox * dx + oy * dy), C = ox * ox + oy * oy - R * R;
+  const disc = B * B - 4 * A * C;
+  if (disc < 0) return p;
+  const tt = (-B + Math.sqrt(disc)) / (2 * A);
+  return { x: r.cx + dx * tt, y: r.cy + dy * tt };
 }
 
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -3071,8 +3102,8 @@ function edgeGeometry(e) {
   const b = App.doc.nodes.find((n) => n.id === e.to);
   if (!a || !b) return null;
   const ra = nodeRect(a), rb = nodeRect(b);
-  const p1 = anchor(ra, rb.cx, rb.cy, a.shape === 'round' && !a.open && !a.image);
-  const p2 = anchor(rb, ra.cx, ra.cy, b.shape === 'round' && !b.open && !b.image);
+  const p1 = anchor(ra, rb.cx, rb.cy, nodeRadius(a));
+  const p2 = anchor(rb, ra.cx, ra.cy, nodeRadius(b));
   return { p1, p2 };
 }
 
@@ -3797,7 +3828,7 @@ function onPointerMove(ev) {
     g.moved = true;
     const from = getNode(g.from);
     const p = screenToWorld(ev.clientX, ev.clientY);
-    const a = anchor(nodeRect(from), p.x, p.y, from.shape === 'round' && !from.open && !from.image);
+    const a = anchor(nodeRect(from), p.x, p.y, nodeRadius(from));
     App.tempWire.setAttribute('d', 'M' + a.x + ',' + a.y + ' L' + p.x + ',' + p.y);
     const over = document.elementFromPoint(ev.clientX, ev.clientY);
     const t = over && over.closest('.node');
