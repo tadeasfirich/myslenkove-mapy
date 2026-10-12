@@ -283,11 +283,12 @@ code{font-family:var(--mono);font-size:.84em;background:var(--bg-3);padding:.08e
 .node.dragging .n-body,.node.dragging .n-head{cursor:grabbing}
 .n-body.empty-hint{color:var(--fg-3);cursor:pointer}
 .n-badge{position:absolute;right:6px;bottom:4px;font-size:10px;color:var(--fg-3)}
-.n-resize{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;
-  border-bottom-right-radius:inherit;
-  opacity:0;background:
-    linear-gradient(135deg,transparent 50%,var(--accent) 50%)}
-.node.sel .n-resize{opacity:1}
+.n-resize{position:absolute;right:0;bottom:0;width:20px;height:20px;cursor:nwse-resize;pointer-events:none;
+  /* celá čtvercová plocha je úchyt (dřív ji oblouk rohu ořízl a v rohu se do ní nedalo trefit);
+     vidět jsou jen dvě čárky, které leží uvnitř zaobleného rohu */
+  opacity:0;background:var(--accent);
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M15 7 7 15M15 11 11 15' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") center / 100% 100% no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M15 7 7 15M15 11 11 15' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") center / 100% 100% no-repeat}
+.node.sel .n-resize{opacity:1;pointer-events:auto}
 .port{
   position:absolute;width:15px;height:15px;border-radius:50%;
   background:var(--bg-2);border:1.6px solid var(--accent);opacity:0;pointer-events:none;
@@ -308,6 +309,7 @@ code{font-family:var(--mono);font-size:.84em;background:var(--bg-3);padding:.08e
   .node.dragging{opacity:.92;box-shadow:0 0 0 2px var(--accent),0 0 0 5px var(--accent-soft),var(--shadow-3)}
   .port{width:22px;height:22px;opacity:0;pointer-events:none}
   .node:hover .port{opacity:0;pointer-events:none}
+  .n-resize{width:30px;height:30px}            /* na dotyku větší úchyt – jen u vybrané buňky */
   .node.sel .port{opacity:1;pointer-events:auto}
   .port.t{top:-12px;left:calc(50% - 11px)} .port.b{bottom:-12px;left:calc(50% - 11px)}
   .port.l{left:-12px;top:calc(50% - 11px)} .port.r{right:-12px;top:calc(50% - 11px)}
@@ -716,7 +718,7 @@ kbd{font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;background:var
 'use strict';
 
 /* verze sestavení – pomůže poznat, jestli prohlížeč nemá načtenou starou kopii */
-const APP_VERSION = '11. 10. 2026 · v11.2';
+const APP_VERSION = '12. 10. 2026 · v11.3';
 
 const $  = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -3666,8 +3668,9 @@ function onPointerDown(ev) {
     els.canvas.classList.add('linking');
     return;
   }
-  /* 2) změna šířky */
-  if (resize && nodeEl) {
+  /* 2) změna šířky – jen u vybrané buňky. Úchyt nevybrané buňky je neviditelný, a když
+        se ho při posouvání mapy prst náhodou dotkl, buňka se nechtěně zúžila nebo roztáhla. */
+  if (resize && nodeEl && App.sel.has(nodeEl.dataset.id)) {
     ev.preventDefault();
     const n = getNode(nodeEl.dataset.id);
     lastSnap = snapshot();
@@ -5974,7 +5977,7 @@ function showHelp() {
         '<kbd>Alt + tažení myší</kbd><span>označí text v poznámce místo posunu buňky</span>' +
         '<kbd>Ctrl + V</kbd><span>vloží obrázek nebo text ze schránky – do vybrané buňky, jinak do nové</span>' +
         '<kbd>tlačítko Obrázek</kbd><span>vloží obrázek z galerie, foťáku nebo schránky – do vybrané buňky, jinak do nové</span>' +
-        '<kbd>prstem: ťuknutí</kbd><span>vybere buňku – teprve pak ji jde táhnout, a to za kteroukoli část</span>' +
+        '<kbd>prstem: ťuknutí</kbd><span>vybere buňku – teprve pak ji jde táhnout (za kteroukoli část) a měnit jí šířku (pravý dolní roh)</span>' +
         '<kbd>prstem: tažení</kbd><span>přes nevybranou buňku posouvá mapu</span>' +
         '<kbd>kolečko myši, dva prsty</kbd><span>přiblížení</span>' +
         '<kbd>F</kbd><span>vycentrovat celou mapu</span>' +
