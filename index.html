@@ -3583,7 +3583,7 @@ function initCanvasEvents() {
     if (ev.target.closest('.toolbar,.zoombar,.inspector,.syncbar')) return;
     const p = screenToWorld(ev.clientX, ev.clientY);
     const n = addNode(p.x - NODE_W / 2, p.y - 20, { title: '' });
-    setTimeout(() => editTitle(n), 10);
+    setTimeout(() => startTitleEdit(n), 10);
   });
 
   c.addEventListener('contextmenu', (ev) => {
@@ -3886,7 +3886,7 @@ function onPointerUp(ev) {
       App.doc.nodes.push(n);
       App.doc.edges.push(newEdge(g.from, n.id));
       renderNodes(); setSel(n.id); scheduleSave();
-      setTimeout(() => editTitle(n), 10);
+      setTimeout(() => startTitleEdit(n), 10);
     }
   }
 }
@@ -3950,7 +3950,7 @@ function initKeys() {
           App.doc.nodes.push(child);
           App.doc.edges.push(newEdge(n.id, child.id));
           renderNodes(); setSel(child.id); scheduleSave();
-          setTimeout(() => editTitle(child), 10);
+          setTimeout(() => startTitleEdit(child), 10);
         }
         break;
       }
@@ -4552,8 +4552,24 @@ function toggleInspector(force) {
 
 /** na mobilu odsune plátno tak, aby vybraná buňka nezůstala pod panelem */
 function revealSelected() {
-  if (innerWidth > 900 || App.sel.size !== 1) return;
+  if (App.sel.size !== 1) return;
   const n = getNode(Array.from(App.sel)[0]); if (!n) return;
+  if (innerWidth > 900) {
+    /* na počítači panel zúží plátno zprava – buňka nesmí zůstat schovaná za ním */
+    requestAnimationFrame(() => {
+      const v = view(), s = nodeSize(n);
+      const cw = els.canvas.clientWidth, ch = els.canvas.clientHeight, m = 40;
+      const left = n.x * v.zoom + v.x, right = left + s.w * v.zoom;
+      const top = n.y * v.zoom + v.y, bottom = top + s.h * v.zoom;
+      let dx = 0, dy = 0;
+      if (right > cw - m) dx = (cw - m) - right;
+      if (left + dx < m) dx = m - left;
+      if (bottom > ch - 90) dy = (ch - 90) - bottom;
+      if (top + dy < m) dy = m - top;
+      if (dx || dy) { v.x += dx; v.y += dy; applyView(); viewChanged(); }
+    });
+    return;
+  }
   requestAnimationFrame(() => {
     const panel = $('#inspector').getBoundingClientRect();
     const canvas = els.canvas.getBoundingClientRect();
@@ -4570,7 +4586,19 @@ function openInspector(focus) {
   if (focus === 'content') {
     const ta = $('#inspContent');
     if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  } else if (focus === 'title') {
+    const ti = $('#inspTitleInput');
+    if (ti) { ti.focus(); ti.select(); }
   }
+}
+
+/** Nová buňka: na počítači se rovnou otevře panel Detail s kurzorem v názvu
+ *  (Tab nebo Enter = obsah, Esc = zpátky do mapy), na dotyku se píše přímo do buňky. */
+function startTitleEdit(n) {
+  if (!n) return;
+  if (isCoarse()) { editTitle(n); return; }
+  if (!(App.sel.size === 1 && App.sel.has(n.id))) setSel(n.id);
+  openInspector('title');
 }
 
 function swatchRow(current, onPick) {
@@ -4742,9 +4770,15 @@ function buildNodeInspector(body, n) {
   if (!n) return;
   const title = document.createElement('input');
   title.className = 'input'; title.value = n.title;
+  title.id = 'inspTitleInput'; title.placeholder = 'Název buňky';
   title.addEventListener('input', () => { n.title = title.value; paintNode(n); measure(); scheduleSave(); });
   title.addEventListener('focus', beginTextEdit);
   title.addEventListener('blur', endTextEdit);
+  /* rychlý zápis: Enter i Tab skočí do obsahu, Esc vrátí do mapy (buňka zůstane vybraná) */
+  title.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); openInspector('content'); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); title.blur(); }
+  });
   body.appendChild(fieldWrap('Název', title));
 
   const ta = document.createElement('textarea');
@@ -4753,6 +4787,9 @@ function buildNodeInspector(body, n) {
   ta.rows = 9;
   ta.addEventListener('focus', beginTextEdit);
   ta.addEventListener('blur', endTextEdit);
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); ta.blur(); }
+  });
   ta.addEventListener('input', () => {
     n.content = ta.value;
     if (!n.open && ta.value) n.open = true;
@@ -5054,7 +5091,7 @@ function showContextMenu(x, y, onNode, spot) {
     item('Smazat', () => deleteSelection(), true);
   } else {
     const p = spot || screenToWorld(x, y);
-    item('Nová buňka sem', () => { const n = addNode(p.x - NODE_W / 2, p.y - 20, { title: '' }); setTimeout(() => editTitle(n), 10); });
+    item('Nová buňka sem', () => { const n = addNode(p.x - NODE_W / 2, p.y - 20, { title: '' }); setTimeout(() => startTitleEdit(n), 10); });
     item('Vložit obrázek…', () => openImageSheet(null, p));
     item('Vybrat vše', () => {
       setSel(App.doc.nodes.map((n) => n.id));
@@ -5798,7 +5835,7 @@ async function createMap() {
     const entry = await Store.createFrom(doc);
     entry.fresh = true;                         // první buňku po otevření vystředíme
     await openMap(entry);
-    setTimeout(() => { setSel(n1.id); editTitle(n1); }, 60);
+    setTimeout(() => { setSel(n1.id); startTitleEdit(n1); }, 60);
   } catch (err) {
     console.error(err);
     toast('Nepodařilo se vytvořit mapu: ' + err.message, 4000);
@@ -5964,6 +6001,7 @@ function showHelp() {
         '<kbd>dvojklik na název</kbd><span>přepsat název</span>' +
         '<kbd>Enter</kbd><span>přejmenovat vybranou buňku</span>' +
         '<kbd>Tab</kbd><span>nová spojená buňka vedle</span>' +
+        '<kbd>nová buňka na počítači</kbd><span>otevře se panel Detail: piš název, Tab nebo Enter = obsah, Esc = zpátky do mapy</span>' +
         '<kbd>E</kbd><span>skrýt / ukázat obsah</span>' +
         '<kbd>Ctrl + I</kbd><span>panel detailu</span>' +
         '<kbd>Ctrl + Z / Ctrl + Shift + Z</kbd><span>zpět / vpřed</span>' +
@@ -6098,7 +6136,7 @@ async function init() {
     const r = els.canvas.getBoundingClientRect();
     const p = screenToWorld(r.left + r.width / 2, r.top + r.height / 3);
     const n = addNode(p.x - NODE_W / 2, p.y, { title: '' });
-    setTimeout(() => editTitle(n), 10);
+    setTimeout(() => startTitleEdit(n), 10);
   });
   $('#tLink').addEventListener('click', () => {
     App.tool = App.tool === 'link' ? 'pan' : 'link';
