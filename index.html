@@ -1023,10 +1023,11 @@ function markdownBody(src, interactive) {
       out.push(html + '</tbody></table>');
       continue;
     }
-    // seznamy (včetně zanoření po 2 mezerách)
-    m = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line);
+    // seznamy: zanoření po 2 mezerách, nebo víc spojovníků („-- “ = o úroveň hlouběji)
+    m = /^(\s*)(-{1,4}|[*+]|\d+[.)])\s+(.*)$/.exec(line);
     if (m) {
-      const depth = Math.floor(m[1].replace(/\t/g, '  ').length / 2) + 1;
+      const dashes = /^-+$/.test(m[2]) ? m[2].length : 1;
+      const depth = Math.floor(m[1].replace(/\t/g, '  ').length / 2) + dashes;
       const type = /\d/.test(m[2]) ? 'ol' : 'ul';
       while (listStack.length > depth) out.push(listStack.pop() === 'ol' ? '</ol>' : '</ul>');
       if (listStack.length < depth) {
@@ -1050,7 +1051,7 @@ function markdownBody(src, interactive) {
     // odstavec
     closeLists(0);
     const para = [line]; i++;
-    while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|\s*>|```|\s*([-*+]|\d+[.)])\s)/.test(lines[i])) {
+    while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|\s*>|```|\s*(-{1,4}|[*+]|\d+[.)])\s)/.test(lines[i])) {
       para.push(lines[i]); i++;
     }
     out.push('<p>' + para.map(mdInline).join('<br>') + '</p>');
@@ -1063,7 +1064,7 @@ function markdownBody(src, interactive) {
 function toggleTask(src, index) {
   let k = 0;
   return String(src).replace(
-    /^([ \t]*(?:>[ \t]*)*(?:[-*+]|\d+[.)])[ \t]+)\[([ xX])\]/gm,
+    /^([ \t]*(?:>[ \t]*)*(?:-{1,4}|[*+]|\d+[.)])[ \t]+)\[([ xX])\]/gm,
     (m, pre, ch) => (k++ === index ? pre + '[' + (ch === ' ' ? 'x' : ' ') + ']' : m)
   );
 }
@@ -4783,7 +4784,7 @@ function buildNodeInspector(body, n) {
 
   const ta = document.createElement('textarea');
   ta.className = 'textarea'; ta.id = 'inspContent'; ta.value = n.content;
-  ta.placeholder = 'Volitelný obsah buňky – funguje Markdown:\n# Nadpis\n**tučně**, *kurzíva*, `kód`\n- odrážka\n- [ ] úkol\n> citace';
+  ta.placeholder = 'Volitelný obsah buňky – funguje Markdown:\n# Nadpis\n**tučně**, *kurzíva*, `kód`\n- odrážka\n-- vnořená odrážka\n- [ ] úkol\n> citace';
   ta.rows = 9;
   ta.addEventListener('focus', beginTextEdit);
   ta.addEventListener('blur', endTextEdit);
@@ -6002,6 +6003,7 @@ function showHelp() {
         '<kbd>Enter</kbd><span>přejmenovat vybranou buňku</span>' +
         '<kbd>Tab</kbd><span>nová spojená buňka vedle</span>' +
         '<kbd>nová buňka na počítači</kbd><span>otevře se panel Detail: piš název, Tab nebo Enter = obsah, Esc = zpátky do mapy</span>' +
+        '<kbd>-- text</kbd><span>v obsahu: vnořená odrážka pod předchozí „- text“ (--- = ještě hlouběji)</span>' +
         '<kbd>E</kbd><span>skrýt / ukázat obsah</span>' +
         '<kbd>Ctrl + I</kbd><span>panel detailu</span>' +
         '<kbd>Ctrl + Z / Ctrl + Shift + Z</kbd><span>zpět / vpřed</span>' +
