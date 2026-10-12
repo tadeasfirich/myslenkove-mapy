@@ -3200,8 +3200,11 @@ const ImgPool = {
 };
 
 function snapshot() {
+  /* naměřená výška buňky (h) do kroku zpět nepatří – mění se při každém uložení a jinak
+     by z pouhého uložení vznikl prázdný krok zpět */
   return JSON.stringify({ nodes: App.doc.nodes, edges: App.doc.edges, title: App.doc.title },
-    (k, v) => (k === 'image' && typeof v === 'string' && v.length > 1024 ? ImgPool.put(v) : v));
+    (k, v) => (k === 'h' ? undefined
+      : k === 'image' && typeof v === 'string' && v.length > 1024 ? ImgPool.put(v) : v));
 }
 let lastSnap = null;
 function commitUndo(snap) {
@@ -3224,7 +3227,7 @@ function endTextEdit() {
 }
 function applySnap(s) {
   const o = JSON.parse(s);
-  o.nodes.forEach((n) => { n.image = ImgPool.get(n.image); });
+  o.nodes.forEach((n) => { n.image = ImgPool.get(n.image); n.h = n.h || 0; });
   App.doc.nodes = o.nodes; App.doc.edges = o.edges;
   if (o.title !== undefined) { App.doc.title = o.title; $('#docTitle').value = o.title; }
   App.sel.forEach((id) => { if (!getNode(id)) App.sel.delete(id); });
