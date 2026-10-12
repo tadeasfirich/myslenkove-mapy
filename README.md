@@ -161,6 +161,21 @@ potřebují připojení) a objeví se v systémové nabídce **Sdílet**.
 
 Tlačítko **Zpět** zavře otevřenou nabídku, z mapy vrátí do knihovny.
 
+### Rychlé psaní
+
+Klepni dole na **Buňka**: hned se otevře detail nové buňky a vyjede klávesnice s kurzorem
+v názvu. Klávesa **Další** (Enter) skočí do obsahu. Dokud píšeš, panel zabere celou výšku
+nad klávesnicí, aby byl celý název i obsah vidět. V hlavičce panelu je:
+
+- **Další buňka** – nová buňka napojená na tuhle (pod ní), kurzor rovnou v jejím názvu,
+- **Hotovo** – zpátky do mapy, nová buňka je vybraná a vidět.
+
+Když klávesnici schováš, panel sjede zpátky dolů a nad ním je zase vidět mapa.
+
+Na počítači funguje totéž klávesami: nová buňka otevře panel Detail, **Tab** nebo **Enter**
+skočí z názvu do obsahu, **Esc** vrátí do mapy a další **Tab** založí napojenou buňku.
+V obsahu udělá `-- text` vnořenou odrážku pod předchozí `- text`.
+
 ### Obrázek do buňky
 
 1. Klepni na buňku (vybere se).

@@ -2,7 +2,7 @@
 <html lang="cs">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=5">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=5,interactive-widget=resizes-content">
 <meta name="color-scheme" content="light dark">
 <meta name="description" content="Volné myšlenkové mapy – aplikace v jediném HTML souboru, mapy na tvém Google Disku.">
 <title>Myšlenkové mapy</title>
@@ -400,6 +400,9 @@ code{font-family:var(--mono);font-size:.84em;background:var(--bg-3);padding:.08e
 .seg button[aria-pressed="true"]{background:var(--bg-3);color:var(--accent);font-weight:700;
   box-shadow:inset 0 -2.5px 0 var(--accent)}
 .drag-handle{display:none}
+.writing-only{display:none}
+.editor.writing .writing-only{display:inline-flex}
+.editor.writing .writing-only.hidden{display:none}
 
 /* ---------- dialogy, hlášky ---------- */
 .scrim{position:fixed;inset:0;background:rgba(20,23,31,.5);z-index:60;
@@ -521,6 +524,11 @@ kbd{font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;background:var
   .toolbar .btn{min-width:42px;min-height:42px;padding:0 10px}
   .zoombar{bottom:calc(72px + env(safe-area-inset-bottom));right:10px}
   .editor.panel-open .toolbar,.editor.panel-open .zoombar{display:none}
+  /* režim psaní: panel přes celou výšku nad klávesnicí */
+  .editor.writing .inspector{top:0;max-height:none;border-top:0;box-shadow:none}
+  .editor.writing .inspector .drag-handle{display:none}
+  .editor.writing .insp-head{gap:6px}
+  .editor.writing #inspClose{display:none}
   .toast{bottom:calc(80px + env(safe-area-inset-bottom))}
   .library{padding:18px 14px 50px}
   .grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:11px}
@@ -695,6 +703,10 @@ kbd{font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;background:var
       <div class="insp-head">
         <h2 id="inspTitle">Detail</h2>
         <div class="spacer"></div>
+        <button class="btn sm writing-only" id="inspNext" type="button" title="Nová buňka napojená na tuhle">
+          <svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Další buňka
+        </button>
+        <button class="btn sm primary writing-only" id="inspDone" type="button">Hotovo</button>
         <button class="btn ghost icon" id="inspClose" title="Zavřít panel">
           <svg class="ico" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
         </button>
@@ -718,7 +730,7 @@ kbd{font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;background:var
 'use strict';
 
 /* verze sestavení – pomůže poznat, jestli prohlížeč nemá načtenou starou kopii */
-const APP_VERSION = '12. 10. 2026 · v11.3';
+const APP_VERSION = '12. 10. 2026 · v11.4';
 
 const $  = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -3584,7 +3596,7 @@ function initCanvasEvents() {
     if (ev.target.closest('.toolbar,.zoombar,.inspector,.syncbar')) return;
     const p = screenToWorld(ev.clientX, ev.clientY);
     const n = addNode(p.x - NODE_W / 2, p.y - 20, { title: '' });
-    setTimeout(() => startTitleEdit(n), 10);
+    startTitleEdit(n);
   });
 
   c.addEventListener('contextmenu', (ev) => {
@@ -3887,7 +3899,7 @@ function onPointerUp(ev) {
       App.doc.nodes.push(n);
       App.doc.edges.push(newEdge(g.from, n.id));
       renderNodes(); setSel(n.id); scheduleSave();
-      setTimeout(() => startTitleEdit(n), 10);
+      startTitleEdit(n);
     }
   }
 }
@@ -3945,13 +3957,7 @@ function initKeys() {
         const n = getNode(Array.from(App.sel)[0]);
         if (n) {
           ev.preventDefault();
-          pushUndo();
-          const s = nodeSize(n);
-          const child = newNode(n.x + s.w + 70, n.y, '');
-          App.doc.nodes.push(child);
-          App.doc.edges.push(newEdge(n.id, child.id));
-          renderNodes(); setSel(child.id); scheduleSave();
-          setTimeout(() => startTitleEdit(child), 10);
+          startTitleEdit(addConnectedNode(n, false));
         }
         break;
       }
@@ -4572,6 +4578,9 @@ function revealSelected() {
     return;
   }
   requestAnimationFrame(() => {
+    /* v režimu psaní panel zakrývá celou mapu – posouvat ji teď nemá smysl (a buňka by
+       odjela nahoru za lištu). Dorovná se, až se panel vrátí dolů. */
+    if ($('#editor').classList.contains('writing')) return;
     const panel = $('#inspector').getBoundingClientRect();
     const canvas = els.canvas.getBoundingClientRect();
     const v = view(), s = nodeSize(n);
@@ -4591,15 +4600,101 @@ function openInspector(focus) {
     const ti = $('#inspTitleInput');
     if (ti) { ti.focus(); ti.select(); }
   }
+  const f = document.activeElement;
+  if (f && $('#inspector').contains(f)) f.scrollIntoView({ block: 'nearest' });
 }
 
-/** Nová buňka: na počítači se rovnou otevře panel Detail s kurzorem v názvu
- *  (Tab nebo Enter = obsah, Esc = zpátky do mapy), na dotyku se píše přímo do buňky. */
+/** Nová buňka: rovnou se otevře panel Detail s kurzorem v názvu (na telefonu vyjede
+ *  klávesnice). Enter (Tab) = obsah, Esc = zpátky do mapy. Volá se přímo z klepnutí,
+ *  ne se zpožděním – jinak by Android klávesnici neotevřel. */
 function startTitleEdit(n) {
   if (!n) return;
-  if (isCoarse()) { editTitle(n); return; }
   if (!(App.sel.size === 1 && App.sel.has(n.id))) setSel(n.id);
   openInspector('title');
+}
+
+/** nová buňka napojená na danou: na počítači vpravo (Tab), na telefonu pod ní (úzký displej) */
+function addConnectedNode(n, below) {
+  pushUndo();
+  const s = nodeSize(n);
+  const child = below ? newNode(n.x, n.y + s.h + 56, '') : newNode(n.x + s.w + 70, n.y, '');
+  App.doc.nodes.push(child);
+  App.doc.edges.push(newEdge(n.id, child.id));
+  renderNodes(); setSel(child.id); scheduleSave();
+  return child;
+}
+
+/* ---------- psaní na telefonu ----------
+   Dokud je v panelu Detail otevřená klávesnice, panel zabere celou výšku nad ní
+   („režim psaní“): pole pro název a obsah jsou celá vidět a nic se neschovává pod
+   klávesnici. V hlavičce je Hotovo (zpátky do mapy) a Další buňka (rychlý zápis
+   bez klávesy Tab). Jakmile klávesnice zmizí, panel se vrátí dolů a mapa je vidět. */
+const Writing = {
+  on: false,
+  minH: 0,
+  isField(t) {
+    return !!t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && /^(text|search|)$/.test(t.type || '')));
+  },
+  set(v) {
+    v = !!v && isCoarse() && innerWidth <= 900;
+    const was = this.on;
+    this.on = v;
+    this.minH = innerHeight;
+    $('#editor').classList.toggle('writing', v);
+    $('#inspNext').classList.toggle('hidden', !(App.sel.size === 1 && !App.selEdges.size));
+    if (was && !v && inspOpen) revealSelected();     // panel je zase dole – buňka musí být nad ním
+  },
+  init() {
+    const insp = $('#inspector');
+    insp.addEventListener('focusin', (e) => { if (this.isField(e.target)) this.set(true); });
+    insp.addEventListener('focusout', () => setTimeout(() => {
+      const a = document.activeElement;
+      if (!(a && insp.contains(a) && this.isField(a))) this.set(false);
+    }, 0));
+    /* Android při skrytí klávesnice pole neopustí – poznáme to podle toho, že stránka zase povyroste */
+    window.addEventListener('resize', () => {
+      if (!this.on) return;
+      if (innerHeight < this.minH) { this.minH = innerHeight; return; }
+      if (innerHeight > this.minH + 120 && document.activeElement) document.activeElement.blur();
+    });
+    /* tlačítka v hlavičce nesmí pole „odfokusovat“ dřív, než se na ně klikne – jinak by
+       se panel stáhl a klepnutí by přistálo jinde */
+    ['#inspNext', '#inspDone'].forEach((sel) => {
+      const b = $(sel);
+      b.addEventListener('pointerdown', (e) => e.preventDefault());
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+    });
+    $('#inspDone').addEventListener('click', () => {
+      const a = document.activeElement; if (a && a.blur) a.blur();
+      this.set(false);
+      toggleInspector(false);
+      revealNode(getNode(Array.from(App.sel)[0]));
+    });
+    $('#inspNext').addEventListener('click', () => {
+      const n = App.sel.size === 1 ? getNode(Array.from(App.sel)[0]) : null;
+      if (!n) return;
+      endTextEdit();
+      startTitleEdit(addConnectedNode(n, true));
+    });
+  }
+};
+
+/** Po zavření panelu na telefonu: když buňka není pohodlně vidět, posune ji mapa
+ *  doprostřed (ne jen k okraji) – je pak vidět i její okolí a vazby. */
+function revealNode(n) {
+  if (!n) return;
+  requestAnimationFrame(() => {
+    const v = view(), s = nodeSize(n);
+    const cw = els.canvas.clientWidth, ch = els.canvas.clientHeight, m = 24;
+    const left = n.x * v.zoom + v.x, right = left + s.w * v.zoom;
+    const top = n.y * v.zoom + v.y, bottom = top + s.h * v.zoom;
+    if (left >= m && right <= cw - m && top >= m && bottom <= ch - 90) return;
+    v.x = Math.round(cw / 2 - (n.x + s.w / 2) * v.zoom);
+    v.y = Math.round(ch * 0.4 - (n.y + s.h / 2) * v.zoom);
+    els.world.style.transition = 'transform .25s cubic-bezier(.2,.7,.3,1)';
+    setTimeout(() => { els.world.style.transition = ''; }, 280);
+    applyView(); viewChanged();
+  });
 }
 
 function swatchRow(current, onPick) {
@@ -4772,12 +4867,13 @@ function buildNodeInspector(body, n) {
   const title = document.createElement('input');
   title.className = 'input'; title.value = n.title;
   title.id = 'inspTitleInput'; title.placeholder = 'Název buňky';
+  title.setAttribute('enterkeyhint', 'next');          // na klávesnici telefonu „Další“ = skok do obsahu
   title.addEventListener('input', () => { n.title = title.value; paintNode(n); measure(); scheduleSave(); });
   title.addEventListener('focus', beginTextEdit);
   title.addEventListener('blur', endTextEdit);
   /* rychlý zápis: Enter i Tab skočí do obsahu, Esc vrátí do mapy (buňka zůstane vybraná) */
   title.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); openInspector('content'); }
+    if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); openInspector('content'); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); title.blur(); }
   });
   body.appendChild(fieldWrap('Název', title));
@@ -5092,7 +5188,7 @@ function showContextMenu(x, y, onNode, spot) {
     item('Smazat', () => deleteSelection(), true);
   } else {
     const p = spot || screenToWorld(x, y);
-    item('Nová buňka sem', () => { const n = addNode(p.x - NODE_W / 2, p.y - 20, { title: '' }); setTimeout(() => startTitleEdit(n), 10); });
+    item('Nová buňka sem', () => { const n = addNode(p.x - NODE_W / 2, p.y - 20, { title: '' }); startTitleEdit(n); });
     item('Vložit obrázek…', () => openImageSheet(null, p));
     item('Vybrat vše', () => {
       setSel(App.doc.nodes.map((n) => n.id));
@@ -6002,7 +6098,8 @@ function showHelp() {
         '<kbd>dvojklik na název</kbd><span>přepsat název</span>' +
         '<kbd>Enter</kbd><span>přejmenovat vybranou buňku</span>' +
         '<kbd>Tab</kbd><span>nová spojená buňka vedle</span>' +
-        '<kbd>nová buňka na počítači</kbd><span>otevře se panel Detail: piš název, Tab nebo Enter = obsah, Esc = zpátky do mapy</span>' +
+        '<kbd>nová buňka</kbd><span>otevře se panel Detail: piš název, Tab nebo Enter = obsah, Esc = zpátky do mapy</span>' +
+        '<kbd>na telefonu</kbd><span>při psaní zabere panel celou výšku nad klávesnicí; Další buňka = nová napojená buňka, Hotovo = zpátky do mapy</span>' +
         '<kbd>-- text</kbd><span>v obsahu: vnořená odrážka pod předchozí „- text“ (--- = ještě hlouběji)</span>' +
         '<kbd>E</kbd><span>skrýt / ukázat obsah</span>' +
         '<kbd>Ctrl + I</kbd><span>panel detailu</span>' +
@@ -6138,7 +6235,7 @@ async function init() {
     const r = els.canvas.getBoundingClientRect();
     const p = screenToWorld(r.left + r.width / 2, r.top + r.height / 3);
     const n = addNode(p.x - NODE_W / 2, p.y, { title: '' });
-    setTimeout(() => startTitleEdit(n), 10);
+    startTitleEdit(n);
   });
   $('#tLink').addEventListener('click', () => {
     App.tool = App.tool === 'link' ? 'pan' : 'link';
@@ -6165,6 +6262,7 @@ async function init() {
     showContextMenu(r.left - 40, r.top - 12, App.sel.size > 0, screenToWorld(c.x, c.y));
   });
   $('#inspClose').addEventListener('click', () => toggleInspector(false));
+  Writing.init();
   $('#tImage').addEventListener('click', () => openImageSheet());
   $('#zIn').addEventListener('click', () => { const c = canvasCenter(); zoomAt(c.x, c.y, 1.25); });
   $('#zOut').addEventListener('click', () => { const c = canvasCenter(); zoomAt(c.x, c.y, 1 / 1.25); });
