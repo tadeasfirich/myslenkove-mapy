@@ -730,7 +730,7 @@ kbd{font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;background:var
 'use strict';
 
 /* verze sestavení – pomůže poznat, jestli prohlížeč nemá načtenou starou kopii */
-const APP_VERSION = '12. 10. 2026 · v11.4';
+const APP_VERSION = '17. 10. 2026 · v11.5';
 
 const $  = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -3587,9 +3587,11 @@ function initCanvasEvents() {
   }, { passive: false });
 
   c.addEventListener('dblclick', (ev) => {
+    if (Date.now() - (App.lastDoubleTap || 0) < 700) return;   // dvojí ťuknutí už jsme vyřídili sami
     const nodeEl = ev.target.closest('.node');
     if (nodeEl) {
-      if (ev.target.closest('.n-title')) { editTitle(getNode(nodeEl.dataset.id)); return; }
+      /* název se opravuje v panelu Detail – stejně jako obsah (na telefonu vyjede klávesnice) */
+      if (ev.target.closest('.n-title')) { startTitleEdit(getNode(nodeEl.dataset.id)); return; }
       if (ev.target.closest('.n-body')) { openInspector('content'); return; }
       return;
     }
@@ -3877,6 +3879,28 @@ function onPointerMove(ev) {
   }
 }
 
+/* Dvojí ťuknutí prstem poznáváme sami – telefony posílají „dblclick“ nespolehlivě.
+   Na názvu otevře panel Detail s názvem, na obsahu s obsahem (stejně jako dvojklik myší). */
+let lastTap = null;
+function touchDoubleTap(ev, g) {
+  if (!(g && (g.type === 'drag' || (g.type === 'pan' && g.tapNode)) && !g.moved)) { lastTap = null; return false; }
+  const el = document.elementFromPoint(ev.clientX, ev.clientY);
+  const nodeEl = el && el.closest('.node');
+  const part = el && (el.closest('.n-title') ? 'title' : el.closest('.n-body') ? 'body' : '');
+  if (!nodeEl || !part) { lastTap = null; return false; }
+  const now = Date.now(), id = nodeEl.dataset.id;
+  const prev = lastTap;
+  lastTap = { id, part, t: now, x: ev.clientX, y: ev.clientY };
+  if (!prev || prev.id !== id || prev.part !== part || now - prev.t > 380 ||
+      Math.hypot(ev.clientX - prev.x, ev.clientY - prev.y) > 30) return false;
+  lastTap = null;
+  App.lastDoubleTap = now;
+  if (!App.sel.has(id) || App.sel.size !== 1) setSel(id);
+  if (part === 'title') startTitleEdit(getNode(id));
+  else openInspector('content');
+  return true;
+}
+
 function onPointerUp(ev) {
   pointers.delete(ev.pointerId);
   if (pointers.size < 2 && pinch) { pinch = null; viewChanged(); }
@@ -3884,6 +3908,7 @@ function onPointerUp(ev) {
   if (!g) return;
   const cancelled = ev.type === 'pointercancel';
   finishGesture();
+  if (!cancelled && isTouchPointer(ev) && touchDoubleTap(ev, g)) return;
 
   if (g.type === 'pan') {
     if (g.tapNode && !g.moved && !cancelled) { setSel(g.tapNode); hintTouchDrag(); }
@@ -3950,7 +3975,7 @@ function initKeys() {
         break;
       case 'Enter': {
         const n = getNode(Array.from(App.sel)[0]);
-        if (n) { ev.preventDefault(); editTitle(n); }
+        if (n) { ev.preventDefault(); startTitleEdit(n); }
         break;
       }
       case 'Tab': {
@@ -5163,7 +5188,7 @@ function showContextMenu(x, y, onNode, spot) {
   } else if (onNode && App.sel.size) {
     const single = App.sel.size === 1 ? getNode(Array.from(App.sel)[0]) : null;
     if (single) {
-      item('Přejmenovat', () => editTitle(single));
+      item('Přejmenovat', () => startTitleEdit(single));
       item(single.open ? 'Skrýt obsah' : 'Ukázat obsah', () => toggleContent(single));
       item('Upravit obsah…', () => openInspector('content'));
       item(single.image ? 'Vyměnit obrázek…' : 'Vložit obrázek…', () => openImageSheet(single.id));
@@ -6095,8 +6120,8 @@ function showHelp() {
         '<kbd>dvojklik do plátna</kbd><span>nová buňka</span>' +
         '<kbd>tažení za kolečko na okraji</kbd><span>nová vazba (pusť na prázdno = nová spojená buňka)</span>' +
         '<kbd>klik na ▸</kbd><span>skrýt / ukázat obsah buňky</span>' +
-        '<kbd>dvojklik na název</kbd><span>přepsat název</span>' +
-        '<kbd>Enter</kbd><span>přejmenovat vybranou buňku</span>' +
+        '<kbd>dvojklik na název</kbd><span>opravit název v panelu Detail (na telefonu dvojí ťuknutí)</span>' +
+        '<kbd>Enter</kbd><span>přejmenovat vybranou buňku (otevře panel Detail)</span>' +
         '<kbd>Tab</kbd><span>nová spojená buňka vedle</span>' +
         '<kbd>nová buňka</kbd><span>otevře se panel Detail: piš název, Tab nebo Enter = obsah, Esc = zpátky do mapy</span>' +
         '<kbd>na telefonu</kbd><span>při psaní zabere panel celou výšku nad klávesnicí; Další buňka = nová napojená buňka, Hotovo = zpátky do mapy</span>' +

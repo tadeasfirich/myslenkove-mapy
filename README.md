@@ -172,6 +172,11 @@ nad klávesnicí, aby byl celý název i obsah vidět. V hlavičce panelu je:
 
 Když klávesnici schováš, panel sjede zpátky dolů a nad ním je zase vidět mapa.
 
+Název existující buňky opravíš stejně: **dvojí ťuknutí na název** otevře detail s celým
+názvem označeným, takže ho rovnou přepíšeš (dvojí ťuknutí na obsah otevře obsah).
+Na počítači totéž udělá dvojklik na název, **Enter** na vybrané buňce nebo **Přejmenovat**
+v nabídce pravého tlačítka.
+
 Na počítači funguje totéž klávesami: nová buňka otevře panel Detail, **Tab** nebo **Enter**
 skočí z názvu do obsahu, **Esc** vrátí do mapy a další **Tab** založí napojenou buňku.
 V obsahu udělá `-- text` vnořenou odrážku pod předchozí `- text`.
