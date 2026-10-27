@@ -730,7 +730,7 @@ kbd{font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;background:var
 'use strict';
 
 /* verze sestavení – pomůže poznat, jestli prohlížeč nemá načtenou starou kopii */
-const APP_VERSION = '17. 10. 2026 · v11.5';
+const APP_VERSION = '27. 10. 2026 · v11.6';
 
 const $  = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -947,30 +947,49 @@ function safeUrl(u, forImage) {
   return s;                                                  // relativní odkaz nebo #kotva
 }
 
+/* Řádkový Markdown. Kód a odkazy se nejdřív „uschovají“ pod značku a tučné písmo,
+   kurzíva ani škrtnutí na ně pak nesáhnou. Dřív se kurzíva převáděla dřív než adresy,
+   takže podtržítka v adrese (…/firich_skola_libcice_cz/…) udělala uprostřed odkazu
+   kurzívu a odkaz se u ní utrhl. */
+function mdEmphasis(t) {
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/(^|[^\w])__([^_]+)__(?!\w)/g, '$1<strong>$2</strong>');
+  t = t.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  /* _kurzíva_ jen jako samostatné slovo – podtržítko uprostřed slova (moje_soubor_v2) není kurzíva */
+  t = t.replace(/(^|[^\w])_([^_\n]+)_(?!\w)/g, '$1<em>$2</em>');
+  t = t.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+  return t;
+}
+
 function mdInline(s) {
-  let t = esc(s);
+  const keep = [];
+  const hold = (html) => '\u0001' + (keep.push(html) - 1) + '\u0002';
+  let t = esc(String(s == null ? '' : s).replace(/[\u0001\u0002]/g, ''));
   // kód
-  t = t.replace(/`([^`]+)`/g, (m, c) => '<code>' + c + '</code>');
+  t = t.replace(/`([^`]+)`/g, (m, c) => hold('<code>' + c + '</code>'));
   // obrázek ![alt](src)
   t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, a, u) => {
     const ok = safeUrl(u, true);
-    return ok ? '<img src="' + ok + '" alt="' + a + '" loading="lazy">' : a;
+    return ok ? hold('<img src="' + ok + '" alt="' + a + '" loading="lazy">') : a;
   });
-  // odkaz [text](url)
+  // odkaz [text](url) – text odkazu smí být tučně / kurzívou, adresa zůstává nedotčená
   t = t.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, a, u) => {
     const ok = safeUrl(u, false);
-    return ok ? '<a href="' + ok + '" target="_blank" rel="noopener noreferrer">' + a + '</a>' : a;
+    return ok ? hold('<a href="' + ok + '" target="_blank" rel="noopener noreferrer">' + mdEmphasis(a) + '</a>') : a;
   });
-  // tučné / kurzíva / škrtnuté
-  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  t = t.replace(/__([^_]+)__/g, '<strong>$1</strong>');
-  t = t.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
-  t = t.replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>');
-  t = t.replace(/~~([^~]+)~~/g, '<del>$1</del>');
-  // automatické odkazy
-  t = t.replace(/(^|[\s(])((?:https?:\/\/|www\.)[^\s<)]+)/g,
-    (m, pre, u) => pre + '<a href="' + (u.startsWith('www.') ? 'https://' + u : u) +
-      '" target="_blank" rel="noopener noreferrer">' + u + '</a>');
+  // automatické odkazy (tečka, čárka apod. na konci patří do věty, ne do adresy)
+  t = t.replace(/(^|[\s(])((?:https?:\/\/|www\.)[^\s<)\u0001]+)/g, (m, pre, u) => {
+    let end = '';
+    for (let mm; (mm = /(?:[.,;:!?]|&quot;|&#39;)$/.exec(u)) && u.length > mm[0].length;) {
+      end = mm[0] + end; u = u.slice(0, -mm[0].length);
+    }
+    return pre + hold('<a href="' + (u.startsWith('www.') ? 'https://' + u : u) +
+      '" target="_blank" rel="noopener noreferrer">' + u + '</a>') + end;
+  });
+  // tučné / kurzíva / škrtnuté – až teď, mimo kód a odkazy
+  t = mdEmphasis(t);
+  // vrátit uschované kousky (mohou být vnořené: kód v textu odkazu)
+  for (let k = 0; k < 4 && t.indexOf('\u0001') >= 0; k++) t = t.replace(/\u0001(\d+)\u0002/g, (m, i) => keep[+i]);
   return t;
 }
 
